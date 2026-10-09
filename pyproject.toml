@@ -1,0 +1,106 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "discoursekit"
+version = "0.1.0.dev0"
+description = "Linguistic measures for discourse research: lexical diversity and semantic coherence, each tied to a stated hypothesis."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT AND Unicode-3.0"
+license-files = ["LICENSE", "LICENSES/Unicode-3.0.txt"]
+authors = [{ name = "Axel Coiffard-Donaty" }]
+keywords = [
+    "computational linguistics",
+    "discourse analysis",
+    "lexical diversity",
+    "MATTR",
+    "semantic coherence",
+    "topic segmentation",
+    "tokenization",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Text Processing :: Linguistic",
+    "Typing :: Typed",
+]
+dependencies = ["numpy>=1.26"]
+
+[project.urls]
+Repository = "https://github.com/AxelNoun/discoursekit"
+Issues = "https://github.com/AxelNoun/discoursekit/issues"
+Changelog = "https://github.com/AxelNoun/discoursekit/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+# Sentence embeddings for the coherence measures. Heavy (it installs PyTorch),
+# hence optional: any other source of embeddings can be used instead.
+embeddings = ["sentence-transformers>=3.0"]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/discoursekit"]
+
+[tool.pytest.ini_options]
+# The examples in the docstrings and in the README are run as tests, so that
+# the documentation cannot drift away from the code. The importlib mode lets
+# the modules under src/ be collected whether the package is installed in
+# editable mode or not.
+testpaths = ["tests", "src", "README.md"]
+addopts = "-ra --strict-markers --strict-config --import-mode=importlib --doctest-modules --doctest-glob=README.md -m 'not network'"
+markers = [
+    "network: needs network access to download a published model (not run by default)",
+]
+xfail_strict = true
+filterwarnings = [
+    "error",
+    # Deprecations raised inside optional third-party libraries are not ours to fix.
+    "ignore::DeprecationWarning:(torch|transformers|sentence_transformers|huggingface_hub)\\..*",
+    "ignore::FutureWarning:(torch|transformers|sentence_transformers|huggingface_hub)\\..*",
+]
+
+[tool.coverage.run]
+source = ["discoursekit"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.ruff]
+line-length = 88
+src = ["src", "tests", "tools"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "D", "RUF"]
+ignore = ["D203", "D213"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D"]
+# Generated table of integers.
+"src/discoursekit/_wordbreak_data.py" = ["E501"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.mypy]
+strict = true
+files = ["src", "tests", "tools", "studies"]
+
+[[tool.mypy.overrides]]
+# Optional dependencies, imported lazily; they may not be installed.
+module = ["sentence_transformers.*", "torch.*", "transformers.*"]
+ignore_missing_imports = true

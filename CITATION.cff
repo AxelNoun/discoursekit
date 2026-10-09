@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite it using the metadata below, and
+  cite the source of each measure you report (see docs/metrics.md).
+type: software
+title: "discoursekit: linguistic measures for discourse research"
+abstract: >-
+  A Python library of linguistic measures for discourse research: word
+  tokenisation based on Unicode Standard Annex #29, lexical diversity
+  (moving-average type-token ratio), semantic coherence computed from
+  embeddings, and a permutation test for topic boundaries. Each measure is
+  tied to a stated hypothesis and documented with its known confounds.
+authors:
+  - family-names: Coiffard-Donaty
+    given-names: Axel
+version: 0.1.0.dev0
+repository-code: "https://github.com/AxelNoun/discoursekit"
+# Licence of the code. The Unicode data files distributed with it are under
+# the Unicode License v3 (see LICENSES/), an identifier that version 1.2.0 of
+# the Citation File Format does not accept in this field.
+license: MIT
+keywords:
+  - computational linguistics
+  - discourse analysis
+  - lexical diversity
+  - semantic coherence
+  - topic segmentation
+  - tokenization
