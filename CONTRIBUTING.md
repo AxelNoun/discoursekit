@@ -54,8 +54,10 @@ A change to the test for topic boundaries is followed by a new run of
 `studies/block_similarity_comparison.py`. Their outputs replace the files of
 `studies/results/`, and the tables of
 [docs/validation.md](docs/validation.md) are copied from them: a test fails
-when the page and the stored outputs differ. The text that comments on the
-tables is revised by hand.
+when a table of that part of the page is not, row for row, one of the stored
+tables. The text that comments on the tables is revised by hand.
+`studies/repeated_unit_embeddings.py` concerns the embedding adapter and
+needs the optional dependency; its output is stored in the same folder.
 
 ## Updating the Unicode data
 

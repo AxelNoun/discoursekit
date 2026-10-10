@@ -141,6 +141,34 @@ def test_truncation_cannot_be_counted_without_a_tokeniser(
         plain(["one", "two"])
 
 
+class RecordingModel(StandInModel):
+    """A model that records its input and numbers the rows of its output."""
+
+    def __init__(self) -> None:
+        self.received: list[list[str]] = []
+
+    def encode(self, texts: list[str], **options: object) -> NDArray[np.float32]:
+        self.received.append(list(texts))
+        return np.arange(len(texts) * 3, dtype=np.float32).reshape(len(texts), 3)
+
+
+def test_a_unit_that_occurs_several_times_is_embedded_once(
+    plain: SentenceTransformerEmbedder,
+) -> None:
+    model = RecordingModel()
+    plain._model = model
+    vectors = plain(["b", "a", "b", "c", "a", "b"])
+    # The model receives each distinct unit once, in order of first occurrence,
+    assert model.received == [["b", "a", "c"]]
+    # and every occurrence of a unit is given the vector of that unit.
+    first, second, third = [0.0, 1.0, 2.0], [3.0, 4.0, 5.0], [6.0, 7.0, 8.0]
+    assert vectors.tolist() == [first, second, first, third, second, first]
+    assert vectors.dtype == np.float64
+    # Units that differ in any character are different units.
+    plain(["a", "A", "a "])
+    assert model.received[-1] == ["a", "A", "a "]
+
+
 def test_empty_input_with_the_older_name_of_the_dimension_method(
     plain: SentenceTransformerEmbedder,
 ) -> None:
@@ -216,6 +244,14 @@ def test_records_what_must_be_reported(model_path: str) -> None:
     assert embedder.revision is None
     assert embedder.max_tokens == MAX_TOKENS
     assert embedder.batch_size == 32
+    # Integers of other libraries are accepted and recorded as plain ones.
+    other = SentenceTransformerEmbedder(
+        model_path,
+        device="cpu",
+        batch_size=np.int64(8),  # type: ignore[arg-type]
+    )
+    assert other.batch_size == 8
+    assert type(other.batch_size) is int
 
 
 def test_returns_one_float64_row_per_unit(embed: SentenceTransformerEmbedder) -> None:
@@ -253,6 +289,19 @@ def test_a_unit_is_embedded_independently_of_the_others(
     alone = embed([UNITS[0]])
     together = embed(UNITS)
     assert np.allclose(alone[0], together[0], atol=1e-6)
+
+
+def test_equal_units_have_equal_vectors(embed: SentenceTransformerEmbedder) -> None:
+    # Passed to the model three times, the first unit would be padded to
+    # different lengths in different batches, and its three vectors could
+    # differ in their last digits. It is passed once.
+    longer = "the stock market fell and the bank rate rose"
+    distinct = [UNITS[0], longer, UNITS[1], UNITS[2]]
+    vectors = embed([UNITS[0], longer, UNITS[1], UNITS[0], UNITS[2], UNITS[0]])
+    assert vectors.shape == (6, 16)
+    assert np.array_equal(vectors[3], vectors[0])
+    assert np.array_equal(vectors[5], vectors[0])
+    assert np.array_equal(vectors[[0, 1, 2, 4]], embed(distinct))
 
 
 def test_rejects_a_single_string_and_non_strings(

@@ -319,9 +319,17 @@ def tokenize(
     """
     if not isinstance(text, str):
         raise TypeError(f"text must be a str, got {type(text).__name__}")
+    excluded = _excluded_tokens(exclude, casefold)
+    tokens = _words(text, casefold)
+    if excluded:
+        tokens = [token for token in tokens if token not in excluded]
+    return tokens
+
+
+def _excluded_tokens(exclude: Iterable[str], casefold: bool) -> set[str]:
+    """Validate the tokens to leave out and normalise them like the text."""
     if isinstance(exclude, str):
         raise TypeError("exclude must be a collection of tokens, not a single string")
-
     excluded = set()
     for entry in exclude:
         if not isinstance(entry, str):
@@ -333,8 +341,4 @@ def tokenize(
                 f"gives {len(entry_tokens)}"
             )
         excluded.add(entry_tokens[0])
-
-    tokens = _words(text, casefold)
-    if excluded:
-        tokens = [token for token in tokens if token not in excluded]
-    return tokens
+    return excluded

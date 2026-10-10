@@ -13,9 +13,9 @@ windows of a response with the question that was asked (as described by Iter
 et al., 2018). Bedi et al. (2015) defined first-order coherence as the
 similarity of consecutive phrase vectors, averaged over the text. In a
 sample of 34 young people at clinical high risk, five of whom later developed
-psychosis, the feature that contributed most to classification was the
-minimum coherence between two consecutive phrases. The authors noted that the
-sample was small and that replication in a larger sample was needed.
+psychosis, the coherence feature that contributed most to classification was
+the minimum coherence between two consecutive phrases. The authors noted that
+the sample was small and that replication in a larger sample was needed.
 
 Outside psychiatry, Hoffman et al. (2018) studied the speech of younger and
 older adults with two measures computed on windows of 20 words: local
@@ -36,13 +36,16 @@ Several weaknesses are documented and shape the design of the library.
 
 * **Properties of the text other than coherence.** Iter et al. (2018), in a
   study of 14 participants, found that the models of Elvevåg et al. (2007)
-  and Bedi et al. (2015) gave higher scores to pairs of longer sentences,
-  were disturbed by filled pauses, and gave a high score to a discourse that
-  repeats the same sentence. The library therefore returns the number of
-  units, reports truncated units, lets the study exclude filled pauses at
-  tokenisation, and lists these confounds with each measure.
-* **Scale of the similarity.** Embedding spaces are not isotropic
-  (Ethayarajh, 2019), so the similarity of unrelated units is not zero and
+  and Bedi et al. (2015) attributed greater coherence to longer sentences
+  and to a greater use of verbal fillers, and that repeated words could give
+  a high score to pairs of sentences that were unintelligible. The library
+  does not correct for these properties. It lists them as confounds of each
+  measure, and leaves the preparation of the units (what is done with filled
+  pauses and repetitions, how long the units are) to the study, which should
+  record it.
+* **Scale of the similarity.** The representations produced by contextual
+  language models are not isotropic (Ethayarajh, 2019, for contextual word
+  representations), so the similarity of unrelated units is not zero and
   differs between models. The library reports local coherence together with
   the value it would take for the same units in random order.
 * **Language.** Parola et al. (2023) assessed the generalisability of
@@ -62,26 +65,32 @@ measure of coherence cannot by itself tell these from a deliberate change of
 subject: as Hoffman et al. (2018) observe of their own measure, low local
 coherence is obtained when a speaker switches abruptly between topics.
 
-The library addresses one part of this problem. A change of topic that is
-abrupt and durable gives the text a block structure, which is an ordered
-property: it disappears when the units are reordered at random. Low
-similarity scattered through a text does not. The test for topic boundaries
-builds on the block comparison of TextTiling (Hearst, 1997) and decides by
-permutation whether the deepest valley of similarity is deeper than
-reordering would produce (Phipson & Smyth, 2010, for the p-value), with the
-hierarchical subdivision of Matteson and James (2014). Coherence is then
-reported both for the whole text and within the segments.
+The library deals with one aspect of this, which is a matter of
+measurement: it does not identify any of these phenomena. A change of topic
+that is abrupt and durable gives the text a block structure, which is an
+ordered property: it disappears when the units are reordered at random. Low
+similarity scattered through a text does not disappear. The test for topic
+boundaries builds on the block comparison of TextTiling (Hearst, 1997) and
+decides by permutation whether the deepest valley of similarity is deeper
+than reordering would produce (Phipson & Smyth, 2010, for the p-value), with
+the hierarchical subdivision of Matteson and James (2014). Coherence can then
+be reported both for the whole text and within the segments, so that a
+change of subject need not be counted as low coherence.
 
 This does not settle the question. The test uses the order of the units and
 nothing else; it does not use the cues by which a listener recognises that a
 change of subject is intended, and its power is limited in short texts (see
-[validation.md](validation.md)). When the elicitation procedure defines the
-boundaries, for example a series of questions, they should be supplied
-instead of estimated. Whether the approach separates changes of topic from
-disorganised speech in natural language is to be established by the
-benchmark described in the roadmap. Discriminating original from perturbed
-text is the most common way of evaluating coherence models, and its limits
-have been discussed (Laban et al., 2021).
+[validation.md](validation.md)). Its level holds only if, without a change
+of topic, every order of the units would be equally likely; in coherent
+text consecutive units are more alike than distant ones, and the test can
+then report a boundary where the topic does not change. When the
+elicitation procedure defines the boundaries, for example a series of
+questions, they should be supplied instead of estimated. Whether the approach separates changes of topic from
+the loss of coherence produced by shuffling or inserting sentences, in
+natural language, is to be established by the benchmark described in the
+roadmap. Such a benchmark says nothing about anyone's speech. Discriminating
+original from perturbed text is the most common way of evaluating coherence
+models, and its limits have been discussed (Laban et al., 2021).
 
 ## 4. Lexical diversity
 
@@ -90,9 +99,9 @@ moving-average type-token ratio (Covington & McFall, 2010) removes this
 dependence by averaging the ratio over windows of fixed size. In narrative
 samples from people with aphasia, Fergadiotis et al. (2013) compared four
 measures of lexical diversity and found the strongest evidence of freedom
-from length effects for this measure and for one other (MTLD). Zenker and
-Kyle (2021) examine the minimum text length at which lexical diversity
-indices can be used.
+from length effects for this measure and for one other, the measure of
+textual lexical diversity (MTLD). Zenker and Kyle (2021) examine the minimum
+text length at which lexical diversity indices can be used.
 
 ## 5. Tokenisation
 

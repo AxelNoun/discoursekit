@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Sequence
+from numbers import Integral
 from typing import Any
 
 import numpy as np
@@ -70,6 +71,13 @@ class SentenceTransformerEmbedder:
     to place before every input. It can be too low for a model that adds
     other text of its own.
 
+    A unit that occurs several times is embedded once, and each of its
+    occurrences receives the same vector. Passed to the model several times,
+    the same text can receive vectors that differ in their last digits,
+    depending on the units it is batched with; the test of
+    :func:`discoursekit.segment_topics` would then treat its occurrences as
+    different units.
+
     Embeddings can differ in their last digits between devices, batch sizes
     and versions of the underlying libraries. For an exactly repeatable
     analysis, compute the embeddings once and store them.
@@ -93,7 +101,7 @@ class SentenceTransformerEmbedder:
     ) -> None:
         if not isinstance(model, str) or not model:
             raise TypeError("model must be a non-empty string: a model name or a path")
-        if isinstance(batch_size, bool) or not isinstance(batch_size, int):
+        if isinstance(batch_size, bool) or not isinstance(batch_size, Integral):
             raise TypeError(
                 f"batch_size must be an int, got {type(batch_size).__name__}"
             )
@@ -107,9 +115,9 @@ class SentenceTransformerEmbedder:
                 'library: pip install "discoursekit[embeddings]"'
             ) from error
 
-        self.model_name = model
-        self.revision = revision
-        self.batch_size = batch_size
+        self.model_name: str = model
+        self.revision: str | None = revision
+        self.batch_size: int = int(batch_size)
         self._model: Any = SentenceTransformer(model, device=device, revision=revision)
         limit = getattr(self._model, "max_seq_length", None)
         self.max_tokens: int | None = int(limit) if limit is not None else None
@@ -149,6 +157,9 @@ class SentenceTransformerEmbedder:
     def __call__(self, units: Sequence[str]) -> NDArray[np.float64]:
         """Return an array of shape ``(len(units), n_dimensions)``.
 
+        Equal units have equal rows: each distinct unit is passed to the
+        model once.
+
         Raises
         ------
         TypeError
@@ -173,11 +184,16 @@ class SentenceTransformerEmbedder:
                 TruncationWarning,
                 stacklevel=2,
             )
-        vectors = self._model.encode(
-            texts,
+        distinct = list(dict.fromkeys(texts))
+        encoded = self._model.encode(
+            distinct,
             batch_size=self.batch_size,
             show_progress_bar=False,
             convert_to_numpy=True,
             normalize_embeddings=False,
         )
-        return np.asarray(vectors, dtype=np.float64)
+        vectors = np.asarray(encoded, dtype=np.float64)
+        if len(distinct) < len(texts):
+            row = {text: index for index, text in enumerate(distinct)}
+            vectors = vectors[[row[text] for text in texts]]
+        return vectors

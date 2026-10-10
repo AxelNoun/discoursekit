@@ -15,6 +15,12 @@ about the test itself.
 4. Power. When abrupt changes of topic are planted, how often are they found,
    and at the right place?
 
+It also measures what becomes of the level when all the sequences are tested
+with the same seed, and therefore with the same reorderings, and how often a
+boundary is reported when consecutive units are related, as they are in
+coherent text, without any change of topic. The level of the test does not
+apply to that case.
+
 The sequences are not text. A topic is a direction in a space of 48
 dimensions; a unit on that topic is the direction plus isotropic scatter,
 scaled to unit length. The results describe the behaviour of the statistical
@@ -26,7 +32,7 @@ Usage, from the root of the repository::
     python studies/boundary_test_simulation.py --jobs 2 > results.md
 
 The output does not depend on the number of jobs: every sequence has its own
-seed. The run takes about two and a half hours on one core.
+seed. The run takes about five hours on one core.
 """
 
 from __future__ import annotations
@@ -78,6 +84,14 @@ class Setting:
     def between(self) -> float:
         """Approximate cosine similarity between two units of different topics."""
         return self.overlap * self.within
+
+    def consecutive(self, correlation: float) -> float:
+        """Approximate cosine similarity between two related consecutive units.
+
+        The units are on the same topic and their scatters have the given
+        correlation (see :func:`related_neighbours`).
+        """
+        return (1 + correlation * self.scatter**2) * self.within
 
 
 SETTINGS = (
@@ -189,6 +203,30 @@ def intruder_anywhere(n: int) -> Scenario:
     return scenario
 
 
+# One topic whose units are related to their neighbours
+
+
+def related_neighbours(n: int, correlation: float) -> Scenario:
+    """Return ``n`` units on one topic, each related to the next.
+
+    The scatter of a unit is a mixture of a draw of its own and of the draw
+    of the next unit, so that the scatters of two consecutive units have the
+    given correlation, 0.5 at most, and those of units further apart are
+    independent. Nothing changes along the sequence, but its order is not
+    exchangeable: consecutive units are more alike than other pairs.
+    """
+    share = (1 - math.sqrt(1 - 4 * correlation**2)) / 2
+    own, next_one = math.sqrt(1 - share), math.sqrt(share)
+
+    def scenario(sim: Simulator) -> Sequence:
+        draws = sim.state.standard_normal((n + 1, DIMENSIONS))
+        draws = draws / math.sqrt(DIMENSIONS)
+        scatter = own * draws[:-1] + next_one * draws[1:]
+        return normalise(sim.home + sim.setting.scatter * scatter), ()
+
+    return scenario
+
+
 # One topic interrupted by unrelated units
 
 
@@ -272,9 +310,23 @@ def excursion(before: int, away: int, after: int) -> Scenario:
     return scenario
 
 
+def after_a_short_passage(passage: int, first: int, second: int) -> Scenario:
+    """Return a short passage on one topic, then two segments on two others.
+
+    The boundary counted as planted is the one between the two segments. The
+    passage is meant to be too short for the test to delimit it.
+    """
+
+    def scenario(sim: Simulator) -> Sequence:
+        return sim.blocks(passage, first, second), (passage + first,)
+
+    return scenario
+
+
 SCENARIOS: dict[str, Scenario] = {
     # Every order equally likely
     "8 independent directions": independent_directions(8),
+    "10 independent directions": independent_directions(10),
     "12 independent directions": independent_directions(12),
     "16 independent directions": independent_directions(16),
     "24 independent directions": independent_directions(24),
@@ -321,6 +373,7 @@ SCENARIOS: dict[str, Scenario] = {
     "Transition of 48 units": transition(24, 48, 24, unrelated=False),
     # Abrupt changes
     "Two topics, 4 + 4 units": planted(4, 4),
+    "Two topics, 5 + 5 units": planted(5, 5),
     "Two topics, 6 + 6 units": planted(6, 6),
     "Two topics, 8 + 8 units": planted(8, 8),
     "Two topics, 12 + 12 units": planted(12, 12),
@@ -336,7 +389,26 @@ SCENARIOS: dict[str, Scenario] = {
     "Excursion and return, 10 + 4 + 10 units": excursion(10, 4, 10),
     "Excursion and return, 10 + 8 + 10 units": excursion(10, 8, 10),
     "Excursion and return, 16 + 8 + 16 units": excursion(16, 8, 16),
+    "Two topics, 6 + 6 units, after a passage of 3 units": (
+        after_a_short_passage(3, 6, 6)
+    ),
+    # Consecutive units related, without any change of topic
+    "One topic, 24 units, consecutive units related (0.2)": (
+        related_neighbours(24, 0.2)
+    ),
+    "One topic, 24 units, consecutive units related (0.5)": (
+        related_neighbours(24, 0.5)
+    ),
+    "One topic, 48 units, consecutive units related (0.2)": (
+        related_neighbours(48, 0.2)
+    ),
+    "One topic, 48 units, consecutive units related (0.5)": (
+        related_neighbours(48, 0.5)
+    ),
 }
+
+# Correlations between the scatters of consecutive units in the scenarios above.
+RELATED = (0.2, 0.5)
 
 # The rows of each table: scenario and block size of the test.
 TABLES: dict[str, list[tuple[str, int]]] = {
@@ -347,12 +419,18 @@ TABLES: dict[str, list[tuple[str, int]]] = {
         ("40 independent directions", 3),
         ("64 independent directions", 3),
         ("12 independent directions", 1),
-        ("12 independent directions", 2),
+        ("10 independent directions", 2),
     ],
     "exchangeable": [
         ("One topic", 3),
         ("Two topics, 12 + 12 units, in random order", 3),
         ("One topic, one unrelated unit at a random position", 3),
+    ],
+    "related neighbours": [
+        ("One topic, 24 units, consecutive units related (0.2)", 3),
+        ("One topic, 24 units, consecutive units related (0.5)", 3),
+        ("One topic, 48 units, consecutive units related (0.2)", 3),
+        ("One topic, 48 units, consecutive units related (0.5)", 3),
     ],
     "unrelated units": [
         ("24 units, one unrelated unit in the middle", 3),
@@ -388,25 +466,28 @@ TABLES: dict[str, list[tuple[str, int]]] = {
         ("Excursion and return, 10 + 8 + 10 units", 3),
         ("Excursion and return, 16 + 8 + 16 units", 3),
     ],
-    # Sequences of 8 to 16 units, examined with blocks of three and of two.
+    # Sequences of 8 to 16 units, examined with block sizes 3 and 2.
     "short, block size 3": [
         ("12 units, one unrelated unit in the middle", 3),
         ("12 units, two adjacent unrelated units in the middle", 3),
         ("Drift through the whole sequence, 12 units", 3),
         ("Two topics, 4 + 4 units", 3),
+        ("Two topics, 5 + 5 units", 3),
         ("Two topics, 4 + 8 units", 3),
         ("Excursion and return, 6 + 4 + 6 units", 3),
+        ("Two topics, 6 + 6 units, after a passage of 3 units", 3),
     ],
     "short, block size 2": [
         ("12 units, one unrelated unit in the middle", 2),
         ("12 units, two adjacent unrelated units in the middle", 2),
         ("Drift through the whole sequence, 12 units", 2),
         ("Two topics, 4 + 4 units", 2),
+        ("Two topics, 5 + 5 units", 2),
         ("Two topics, 6 + 6 units", 2),
         ("Two topics, 4 + 8 units", 2),
         ("Excursion and return, 6 + 4 + 6 units", 2),
     ],
-    # Longer sequences, examined with blocks of six units and more.
+    # Longer sequences, examined with a block size of 6.
     "long, block size 6": [
         ("Two topics, 80 + 80 units", 6),
         ("Transition of 24 units", 6),
@@ -419,6 +500,24 @@ TABLES: dict[str, list[tuple[str, int]]] = {
 # sequences than the others and, for the first, in one setting only.
 LEVEL_TABLES = ("independent", "exchangeable")
 
+# Level when all the sequences are tested with one seed: number of
+# reorderings and seed, None standing for a seed of its own for each
+# sequence. The sequences are those of the scenario named below.
+ONE_SEED = "one seed"
+ONE_SEED_SCENARIO = "8 independent directions"
+SEEDING: tuple[tuple[int, int | None], ...] = (
+    (19, None),
+    (19, 0),
+    (19, 3),
+    (199, None),
+    (199, 0),
+    (999, None),
+    (999, 0),
+)
+
+
+Key = tuple[str, str, int, int, int, int | None]
+
 
 @dataclass(frozen=True)
 class Row:
@@ -426,8 +525,10 @@ class Row:
 
     ``stream`` identifies the scenario and the setting. With the index of
     the sequence within the row, it seeds the random state from which the
-    sequence is drawn. Two rows that differ in block size only thus examine
-    the same sequences, and no two other sequences share a seed.
+    sequence is drawn. Two rows that differ only in the parameters of the
+    test thus examine the same sequences, and no two other sequences share a
+    seed. ``seed`` is the seed of the reorderings, or ``None`` when each
+    sequence has a seed of its own, its index within the row.
     """
 
     table: str
@@ -436,6 +537,20 @@ class Row:
     setting: int
     replicates: int
     stream: int
+    n_permutations: int = N_PERMUTATIONS
+    seed: int | None = None
+
+    @property
+    def key(self) -> Key:
+        """What identifies the row among those of a run."""
+        return (
+            self.table,
+            self.name,
+            self.block_size,
+            self.setting,
+            self.n_permutations,
+            self.seed,
+        )
 
 
 @dataclass(frozen=True)
@@ -448,7 +563,7 @@ class Outcome:
     too_many: int
 
 
-def rows(replicates: int, level_replicates: int) -> list[Row]:
+def rows(replicates: int, level_replicates: int, seed_replicates: int) -> list[Row]:
     """Return every row, in a fixed order."""
     names = list(SCENARIOS)
     listed = []
@@ -459,6 +574,20 @@ def rows(replicates: int, level_replicates: int) -> list[Row]:
             for name, block_size in entries:
                 stream = names.index(name) * len(SETTINGS) + setting
                 listed.append(Row(table, name, block_size, setting, count, stream))
+    stream = names.index(ONE_SEED_SCENARIO) * len(SETTINGS)
+    for n_permutations, seed in SEEDING:
+        listed.append(
+            Row(
+                ONE_SEED,
+                ONE_SEED_SCENARIO,
+                BLOCK_SIZE,
+                0,
+                seed_replicates,
+                stream,
+                n_permutations,
+                seed,
+            )
+        )
     return listed
 
 
@@ -473,8 +602,8 @@ def run(row: Row) -> Outcome:
             sequence,
             block_size=row.block_size,
             alpha=ALPHA,
-            n_permutations=N_PERMUTATIONS,
-            seed=replicate,
+            n_permutations=row.n_permutations,
+            seed=replicate if row.seed is None else row.seed,
         ).boundaries
         any_boundary += bool(found)
         too_many += len(found) > len(truth)
@@ -484,7 +613,14 @@ def run(row: Row) -> Outcome:
     return Outcome(row.replicates, any_boundary, all_correct, too_many)
 
 
-Outcomes = dict[tuple[str, str, int, int], Outcome]
+Outcomes = dict[Key, Outcome]
+
+
+def outcome_of(
+    outcomes: Outcomes, table: str, name: str, block_size: int, setting: int
+) -> Outcome:
+    """Return the outcome of a row tested with the parameters of the study."""
+    return outcomes[table, name, block_size, setting, N_PERMUTATIONS, None]
 
 
 def percent(count: int, total: int, digits: int = 0) -> str:
@@ -515,7 +651,7 @@ def level_table(outcomes: Outcomes, table: str) -> list[str]:
     reported = total = 0
     for setting in settings:
         for name, block_size in TABLES[table]:
-            outcome = outcomes[table, name, block_size, setting]
+            outcome = outcome_of(outcomes, table, name, block_size, setting)
             reported += outcome.any_boundary
             total += outcome.replicates
             label = name
@@ -535,18 +671,21 @@ def level_table(outcomes: Outcomes, table: str) -> list[str]:
     return lines
 
 
+def rows_of(table: str) -> list[tuple[str, str, int]]:
+    """Return the rows of a table as (table, scenario, block size)."""
+    return [(table, name, block_size) for name, block_size in TABLES[table]]
+
+
 def by_setting(
-    outcomes: Outcomes, table: str, count: str, names: list[str] | None = None
+    outcomes: Outcomes, entries: list[tuple[str, str, int]], count: str
 ) -> list[str]:
     """Format a table with one row per scenario and one column per setting."""
     letters = " | ".join(setting.letter for setting in SETTINGS)
     lines = [f"| Sequence | {letters} |", "|---|" + "---:|" * len(SETTINGS)]
-    for name, block_size in TABLES[table]:
-        if names is not None and name not in names:
-            continue
+    for table, name, block_size in entries:
         cells = []
         for setting in range(len(SETTINGS)):
-            outcome = outcomes[table, name, block_size, setting]
+            outcome = outcome_of(outcomes, table, name, block_size, setting)
             cells.append(percent(getattr(outcome, count), outcome.replicates))
         lines.append(f"| {name} | " + " | ".join(cells) + " |")
     return lines
@@ -557,7 +696,7 @@ def by_block_size(
 ) -> list[str]:
     """Format rates for the same sequences examined with two block sizes."""
     letters = [setting.letter for setting in SETTINGS]
-    heads = [f"{letter}, blocks of {size}" for size in sizes for letter in letters]
+    heads = [f"{letter}, block size {size}" for size in sizes for letter in letters]
     lines = [
         "| Sequence | " + " | ".join(heads) + " |",
         "|---|" + "---:|" * len(heads),
@@ -572,9 +711,37 @@ def by_block_size(
                 if (name, size) in entries and table not in LEVEL_TABLES
             )
             for setting in range(len(SETTINGS)):
-                outcome = outcomes[table, name, size, setting]
+                outcome = outcome_of(outcomes, table, name, size, setting)
                 cells.append(percent(getattr(outcome, count), outcome.replicates))
         lines.append(f"| {name} | " + " | ".join(cells) + " |")
+    return lines
+
+
+def by_seeding(outcomes: Outcomes) -> list[str]:
+    """Format the rates obtained with one seed for all the sequences."""
+    lines = [
+        "| Reorderings | Seed | Sequences | A boundary is reported | 95% interval |",
+        "|---:|---|---:|---:|---:|",
+    ]
+    for n_permutations, seed in SEEDING:
+        key = (ONE_SEED, ONE_SEED_SCENARIO, BLOCK_SIZE, 0, n_permutations, seed)
+        outcome = outcomes[key]
+        label = "One for each sequence" if seed is None else f"{seed} for all"
+        lines.append(
+            f"| {n_permutations} | {label} | {outcome.replicates} "
+            f"| {percent(outcome.any_boundary, outcome.replicates, 1)} "
+            f"| {interval(outcome.any_boundary, outcome.replicates)} |"
+        )
+    return lines
+
+
+def related_similarities() -> list[str]:
+    """Format the similarities expected when consecutive units are related."""
+    heads = " | ".join(f"Consecutive units ({value})" for value in RELATED)
+    lines = [f"| Setting | {heads} | Other units |", "|---|" + "---:|" * 3]
+    for setting in SETTINGS:
+        cells = " | ".join(f"{setting.consecutive(value):.2f}" for value in RELATED)
+        lines.append(f"| {setting.letter} | {cells} | {setting.within:.2f} |")
     return lines
 
 
@@ -588,9 +755,18 @@ def report(outcomes: Outcomes, replicates: int) -> list[str]:
     ]
     with_change = [
         "Two topics, 4 + 4 units",
+        "Two topics, 5 + 5 units",
         "Two topics, 6 + 6 units",
         "Two topics, 4 + 8 units",
         "Excursion and return, 6 + 4 + 6 units",
+    ]
+    after_a_passage = [
+        ("planted", "Two topics, 6 + 6 units", BLOCK_SIZE),
+        (
+            "short, block size 3",
+            "Two topics, 6 + 6 units, after a passage of 3 units",
+            BLOCK_SIZE,
+        ),
     ]
     scale = [
         "Two topics, 80 + 80 units",
@@ -605,8 +781,8 @@ def report(outcomes: Outcomes, replicates: int) -> list[str]:
         "simulated vectors, not text: see the documentation of the script.",
         "",
         f"Parameters: alpha {ALPHA}, {N_PERMUTATIONS} permutations, "
-        f"{DIMENSIONS} dimensions, block size {BLOCK_SIZE} unless stated "
-        "otherwise.",
+        f"{DIMENSIONS} dimensions, block size {BLOCK_SIZE}, and a seed of its "
+        "own for each sequence, unless stated otherwise.",
         "",
         f"Software: discoursekit {discoursekit.__version__}, NumPy "
         f"{np.__version__}, Python {platform.python_version()}.",
@@ -630,7 +806,7 @@ def report(outcomes: Outcomes, replicates: int) -> list[str]:
         "",
         "In the sequences of this section every order of the units is equally "
         f"likely. The rate of reported boundaries should not exceed "
-        f"{100 * ALPHA:.0f}%.",
+        f"{100 * ALPHA:.0f}%. The intervals are Wilson score intervals.",
         "",
         "Directions drawn independently and uniformly.",
         "",
@@ -640,17 +816,48 @@ def report(outcomes: Outcomes, replicates: int) -> list[str]:
         "",
         *level_table(outcomes, "exchangeable"),
         "",
+        "## One seed for all the sequences",
+        "",
+        "In the tables above each sequence is tested with a seed of its own. "
+        "With one seed for all, sequences of the same length are compared "
+        "with the same reorderings. The rate of reported boundaries over the "
+        f"sequences is then {100 * ALPHA:.0f}% on average over the seeds, and "
+        "can be above or below it for a given seed.",
+        "",
+        f"Sequences of {ONE_SEED_SCENARIO}:",
+        "",
+        *by_seeding(outcomes),
+        "",
+        "## Consecutive units related to each other",
+        "",
+        "One topic, without any change, in which each unit shares part of its "
+        "scatter with the next: two consecutive units are more alike than two "
+        "other units, as in coherent text. The orders of the units are no "
+        "longer equally likely, and the level of the test does not apply. The "
+        "figure in brackets is the correlation between the scatters of two "
+        "consecutive units; units further apart have independent scatters.",
+        "",
+        "Mean cosine similarity between two consecutive units, and between two "
+        "other units:",
+        "",
+        *related_similarities(),
+        "",
+        "Percentage of sequences in which a boundary is reported. In this "
+        "section and the following ones, each percentage rests on "
+        f"{replicates} sequences and is known to within about {margin:.0f} "
+        "points (95% interval, at its widest).",
+        "",
+        *by_setting(outcomes, rows_of("related neighbours"), "any_boundary"),
+        "",
         "## Unrelated units",
         "",
         "One topic interrupted by unrelated units. Two adjacent unrelated units "
         "are on one other subject; scattered ones are each on a subject of "
-        "their own. In this section and the following ones, each percentage "
-        f"rests on {replicates} sequences and is known to within about "
-        f"{margin:.0f} points (95% interval, at its widest).",
+        "their own.",
         "",
         "Percentage of sequences in which a boundary is reported:",
         "",
-        *by_setting(outcomes, "unrelated units", "any_boundary"),
+        *by_setting(outcomes, rows_of("unrelated units"), "any_boundary"),
         "",
         "## Gradual change",
         "",
@@ -659,7 +866,7 @@ def report(outcomes: Outcomes, replicates: int) -> list[str]:
         "",
         "Percentage of sequences in which a boundary is reported:",
         "",
-        *by_setting(outcomes, "drift", "any_boundary"),
+        *by_setting(outcomes, rows_of("drift"), "any_boundary"),
         "",
         "Two topics of 24 units each, joined by a transition during which the "
         "subject moves by equal steps from the first topic to the second. The "
@@ -667,28 +874,31 @@ def report(outcomes: Outcomes, replicates: int) -> list[str]:
         "",
         "Percentage of sequences in which a boundary is reported:",
         "",
-        *by_setting(outcomes, "transition", "any_boundary"),
+        *by_setting(outcomes, rows_of("transition"), "any_boundary"),
         "",
         "## Abrupt changes of topic",
+        "",
+        "An excursion and return is a passage on a second topic between two "
+        "segments on the same first topic.",
         "",
         "Percentage of sequences in which the number of boundaries is right "
         "and each lies within one unit of its true position:",
         "",
-        *by_setting(outcomes, "planted", "all_correct"),
+        *by_setting(outcomes, rows_of("planted"), "all_correct"),
         "",
         "Percentage of sequences in which at least one boundary is reported:",
         "",
-        *by_setting(outcomes, "planted", "any_boundary"),
+        *by_setting(outcomes, rows_of("planted"), "any_boundary"),
         "",
         "Percentage of sequences in which more boundaries are reported than "
         "were planted:",
         "",
-        *by_setting(outcomes, "planted", "too_many"),
+        *by_setting(outcomes, rows_of("planted"), "too_many"),
         "",
         "## Short sequences and block size",
         "",
-        "Sequences of 8 to 16 units, examined with blocks of three units (the "
-        "default) and of two. The same sequences are used for both.",
+        "Sequences of 8 to 16 units, examined with block size 3 (the default) "
+        "and with block size 2. The same sequences are used for both.",
         "",
         "Percentage of sequences in which a boundary is reported (none is planted):",
         "",
@@ -699,11 +909,17 @@ def report(outcomes: Outcomes, replicates: int) -> list[str]:
         "",
         *by_block_size(outcomes, "all_correct", with_change, (3, 2)),
         "",
+        "Two topics of 6 units, alone and after a passage of 3 units on a "
+        "third topic, which is too short to be delimited with block size 3. "
+        "Percentage of sequences in which the boundary between the two topics "
+        "is the only one reported, within one unit of its true position:",
+        "",
+        *by_setting(outcomes, after_a_passage, "all_correct"),
+        "",
         "## Longer sequences and block size",
         "",
-        "Sequences of 72 to 160 units, examined with blocks of three units and "
-        "more (the default) and with blocks of six units and more. The same "
-        "sequences are used for both.",
+        "Sequences of 72 to 160 units, examined with block size 3 (the "
+        "default) and with block size 6. The same sequences are used for both.",
         "",
         "Percentage of sequences in which a boundary is reported:",
         "",
@@ -722,16 +938,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--replicates", type=int, default=500)
     parser.add_argument("--level-replicates", type=int, default=5000)
+    parser.add_argument("--seed-replicates", type=int, default=20000)
     parser.add_argument("--jobs", type=int, default=1)
     arguments = parser.parse_args()
 
-    work = rows(arguments.replicates, arguments.level_replicates)
+    work = rows(
+        arguments.replicates, arguments.level_replicates, arguments.seed_replicates
+    )
     outcomes: Outcomes = {}
     with ProcessPoolExecutor(max_workers=arguments.jobs) as pool:
         for number, (row, outcome) in enumerate(
             zip(work, pool.map(run, work), strict=True), start=1
         ):
-            outcomes[row.table, row.name, row.block_size, row.setting] = outcome
+            outcomes[row.key] = outcome
             done = f"{number}/{len(work)}"
             print(done, row.table, row.name, file=sys.stderr, flush=True)
     print("\n".join(report(outcomes, arguments.replicates)))

@@ -93,3 +93,22 @@ jobs:
         run: pytest tests/test_embedding.py
       - name: Test with a published model
         run: pytest -m network tests/test_embedding.py
+
+  oldest-embeddings:
+    name: Oldest supported sentence-transformers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install PyTorch without GPU libraries
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install
+        run: |
+          python -m pip install "sentence-transformers==3.0.0" "numpy==1.26.4"
+          python -m pip install -e ".[dev,embeddings]"
+      - name: Test with a model built on the spot
+        run: pytest tests/test_embedding.py
+      - name: Test with a published model
+        run: pytest -m network tests/test_embedding.py

@@ -9,9 +9,9 @@ sequences: the test of the library, and the test with the depth measured on
 one similarity only.
 
 The two reduced versions are obtained by setting the depths on the other
-similarity to zero before the depths are combined. The candidate boundaries
-are the same in the three versions, so that the comparison bears on the
-measure of depth alone. The sequences are those of
+similarity to zero before the depths are combined. A similarity whose depths
+are all zero counts for nothing, in the statistic and in the choice of the
+candidate boundary. The sequences are those of
 ``boundary_test_simulation.py``, with the same seeds: the rates of the test
 of the library are those of that simulation.
 
@@ -19,7 +19,7 @@ Usage, from the root of the repository::
 
     python studies/block_similarity_comparison.py --jobs 2 > results.md
 
-The run takes about an hour on one core.
+The run takes about an hour and a half on one core.
 """
 
 from __future__ import annotations
@@ -50,8 +50,8 @@ import discoursekit
 from discoursekit import segment_topics, semantic
 
 Scores = Callable[
-    [NDArray[np.float64], NDArray[np.intp], float],
-    tuple[NDArray[np.float64], NDArray[np.intp], float] | None,
+    [NDArray[np.float64], NDArray[np.intp]],
+    tuple[NDArray[np.float64], NDArray[np.intp], NDArray[np.float64], float] | None,
 ]
 COMBINED: Scores = semantic._scores
 
@@ -67,6 +67,7 @@ WITHOUT_CHANGE = [
     "24 units, one unrelated unit in the middle",
     "Drift through the whole sequence, 60 units",
     "One topic, then a drift over the second half, 60 units",
+    "One topic, 24 units, consecutive units related (0.5)",
 ]
 
 # Sequences with planted changes of topic.
@@ -82,12 +83,14 @@ def keeping(measure: int | None) -> Scores:
     """Return the combination of depths that keeps one similarity, or both."""
 
     def scores(
-        depths: NDArray[np.float64], mirror: NDArray[np.intp], rounding: float
-    ) -> tuple[NDArray[np.float64], NDArray[np.intp], float] | None:
+        depths: NDArray[np.float64], mirror: NDArray[np.intp]
+    ) -> (
+        tuple[NDArray[np.float64], NDArray[np.intp], NDArray[np.float64], float] | None
+    ):
         if measure is not None:
             depths = depths.copy()
             depths[1 - measure] = 0.0
-        return COMBINED(depths, mirror, rounding)
+        return COMBINED(depths, mirror)
 
     return scores
 
@@ -203,7 +206,9 @@ def report(
         f"{replicates} sequences and is known to within about {margin:.0f} "
         "points (95% interval, at its widest).",
         "",
-        "Percentage of sequences in which a boundary is reported:",
+        "Percentage of sequences in which a boundary is reported. In the last "
+        "row the units of one topic are related to their neighbours, without "
+        "any change of topic; the level of the test does not apply to it.",
         "",
         *table(outcomes, WITHOUT_CHANGE, 0, replicates),
         "",

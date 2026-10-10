@@ -13,11 +13,13 @@ This version contains:
   with a segmentation that passes the official conformance test;
 * lexical diversity, as the moving-average type-token ratio (Covington &
   McFall, 2010);
-* semantic coherence computed from embeddings of the units of a text: local
+* semantic coherence computed from embeddings of the units of a text
+  (sentences, utterances or other units chosen by the study): local
   coherence, global coherence, and coherence with respect to a reference such
   as the question asked;
-* a permutation test for changes of topic, so that a change of topic need not
-  be counted as a loss of coherence.
+* coherence within segments, so that a change of topic supplied by the study
+  need not be counted as a loss of coherence, and a permutation test for
+  abrupt changes of topic, whose limits are documented.
 
 The library describes texts. It is not a clinical tool: it does not detect,
 predict or diagnose anything, and none of its measures has been validated
@@ -85,8 +87,8 @@ the study. Any source of embeddings can be used.
 ```
 
 Here the change of topic is known and given as the index of the first unit of
-the new segment. When `boundaries` is omitted, changes of topic are estimated
-by a permutation test, which can also be called on its own:
+the new segment. Without `boundaries`, the text is one segment. Changes of
+topic can also be estimated by a permutation test:
 
 ```python
 >>> from discoursekit import segment_topics
@@ -103,9 +105,17 @@ by a permutation test, which can also be called on its own:
 
 ```
 
-One boundary is reported, before the ninth unit. A text of fewer than eight
-units is too short to be tested with the default settings; the field `tested`
-says whether the test was carried out.
+One boundary is reported, before the ninth unit, and can be passed to
+`coherence` as `boundaries=found.boundaries`. A text of fewer than eight units
+is too short to be tested with the default settings; the field `tested` says
+whether the test was carried out.
+
+The level of this test holds when, without a change of topic, every order of
+the units would be equally likely. In coherent text consecutive units are
+usually more alike than that, and the test then reports boundaries in texts
+that have none: see [docs/validation.md](docs/validation.md). Supply the
+boundaries when the elicitation procedure defines them, and report how they
+were obtained.
 
 With a sentence-embedding model:
 
@@ -117,7 +127,7 @@ embed = SentenceTransformerEmbedder(
     revision="1110a243fdf4706b3f48f1d95db1a4f5529b4d41",  # commit of the model
 )
 units = [...]  # the sentences or utterances of one text, in order
-result = coherence(embed(units))
+result = coherence(embed(units), boundaries=[...])  # known changes of topic
 ```
 
 The result contains the following fields.
@@ -130,7 +140,7 @@ The result contains the following fields.
 | `global_coherence` | Mean similarity between each unit and the centroid of the others |
 | `reference_coherence` | Mean similarity between each unit and a reference vector, if one is given |
 | `local_coherence_within_segments`, `global_coherence_within_segments` | Local and global coherence computed inside the segments delimited by the topic boundaries |
-| `boundaries`, `segmentation` | The boundaries used, and the details of the test if they were estimated |
+| `boundaries` | The boundaries used |
 | `n_units` | Number of units, to be reported and used as a covariate |
 
 ## Documentation
@@ -148,12 +158,14 @@ The functions are documented in their docstrings.
 ## Principles
 
 A measure is added only with a stated hypothesis; there is no option to
-extract every available feature. The same input and parameters give the same
-output, and the parameters that affect a value are returned with it. When a
-measure is undefined for a text the result is `nan`, never a substitute. Each
-measure is tested against values worked out by hand and against a direct
-implementation of its definition, and the word segmentation against the
-conformance file of the standard. Heavy dependencies are optional.
+extract every available feature. With a given version of the library and of
+Python, the same input and parameters give the same output, and the functions
+that summarise a text return the parameters that affect a value with it.
+When a measure is undefined for a text the result is `nan`, never a
+substitute. Each measure is tested against values worked out by hand and
+against a direct implementation of its definition, and the word segmentation
+against the conformance file of the standard. Heavy dependencies are
+optional.
 
 ## Roadmap
 
@@ -162,13 +174,15 @@ conformance file of the standard. Heavy dependencies are optional.
 2. A benchmark of topic change against loss of coherence. Ordinary texts are
    perturbed in controlled ways (sentences shuffled, unrelated sentences
    inserted, genuine changes of topic with transitions) to establish which
-   measures tell these cases apart. Telling an original text from a shuffled
+   measures tell these cases apart, and how often the test for topic
+   boundaries reports a change in ordinary texts that have none. Telling an original text from a shuffled
    one is the most common test of coherence models, and its limits have been
    discussed (Laban et al., 2021). Such a benchmark tests the robustness of
    the measures. It is not a clinical validation, and a perturbed text is not
    a model of anyone's speech.
-3. A robustness study on public, non-clinical corpora: effect of text length,
-   genre and language, and stability over time within an author.
+3. A robustness study on public, non-clinical corpora: effect of the length
+   of the text and of its units, of the embedding model, of genre and of
+   language, and stability over time within an author.
 
 ## Development
 

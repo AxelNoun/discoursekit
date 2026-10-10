@@ -35,7 +35,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from numbers import Integral
 
-from discoursekit.tokenization import tokenize
+from discoursekit.tokenization import _excluded_tokens, tokenize
 
 __all__ = ["DEFAULT_WINDOW", "LexicalDiversity", "lexical_diversity", "mattr"]
 
@@ -147,6 +147,12 @@ class LexicalDiversity:
     n_windows
         Number of windows averaged (0 if the text is shorter than the
         window). With few windows the estimate rests on little data.
+    casefold
+        Whether the tokens were case folded.
+    excluded
+        Tokens that were to be left out, as normalised for the comparison
+        and sorted by code point, whether or not they occur in the text.
+        Empty if none was given.
     """
 
     mattr: float
@@ -154,6 +160,8 @@ class LexicalDiversity:
     n_tokens: int
     n_types: int
     n_windows: int
+    casefold: bool
+    excluded: tuple[str, ...]
 
 
 def lexical_diversity(
@@ -188,6 +196,8 @@ def lexical_diversity(
     0.8
     """
     window = _check_window(window)
+    if not isinstance(exclude, str):
+        exclude = tuple(exclude)  # it is read twice, and may be an iterator
     tokens = tokenize(text, casefold=casefold, exclude=exclude)
     value, n_types = _mattr_and_types(tokens, window)
     return LexicalDiversity(
@@ -196,4 +206,6 @@ def lexical_diversity(
         n_tokens=len(tokens),
         n_types=n_types,
         n_windows=max(0, len(tokens) - window + 1),
+        casefold=bool(casefold),
+        excluded=tuple(sorted(_excluded_tokens(exclude, casefold))),
     )

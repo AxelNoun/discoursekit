@@ -41,12 +41,13 @@ windows were averaged.
 
 The example below draws 200 texts on a single topic at each of four lengths.
 A unit is the direction of the topic plus scatter, in 48 dimensions, so that
-two units have a cosine similarity of about 0.5. For each length it prints
-the number of units and the mean, over the texts, of five quantities: local
-coherence, its reference level (the mean similarity over all pairs of
-units), the standard deviation of local coherence over the orders of the
-units, global coherence, and reference coherence with the direction of the
-topic as reference.
+two units have a cosine similarity of about 0.5. Five quantities are
+computed for each text: local coherence, its reference level (the mean
+similarity over all pairs of units), the standard deviation of local
+coherence over the orders of the units, global coherence, and reference
+coherence with the direction of the topic as reference. For each length the
+example prints the number of units, then the mean of each quantity over the
+200 texts and, on the next line, its standard deviation between texts.
 
 ```python
 >>> import numpy as np
@@ -69,11 +70,16 @@ topic as reference.
 ...                 result.reference_coherence,
 ...             )
 ...         )
-...     print(n_units, *(f"{value:.2f}" for value in np.mean(rows, axis=0)))
-4 0.50 0.50 0.03 0.62 0.71
-8 0.50 0.50 0.02 0.66 0.71
-16 0.50 0.50 0.02 0.69 0.71
-32 0.50 0.50 0.01 0.70 0.71
+...     print(n_units, "mean", *(f"{value:.2f}" for value in np.mean(rows, axis=0)))
+...     print(n_units, "sd  ", *(f"{value:.2f}" for value in np.std(rows, axis=0)))
+4 mean 0.50 0.50 0.03 0.62 0.71
+4 sd   0.06 0.05 0.01 0.05 0.03
+8 mean 0.50 0.50 0.02 0.66 0.71
+8 sd   0.04 0.03 0.00 0.03 0.02
+16 mean 0.50 0.50 0.02 0.69 0.71
+16 sd   0.03 0.02 0.00 0.02 0.02
+32 mean 0.50 0.50 0.01 0.70 0.71
+32 sd   0.02 0.02 0.00 0.01 0.01
 
 ```
 
@@ -81,13 +87,16 @@ The texts are of the same kind at every length, and the quantities do not
 behave alike.
 
 * **Local coherence and its reference level** have the same mean at every
-  length. The value of local coherence for one text is less stable when the
-  text is short: it is the mean of the similarities between consecutive
-  units, four of them for a text of five units, and the order of the units
-  alone moves it. The standard deviation over orders,
-  `local_coherence_shuffled_sd`, states by how much: 0.03 for four units in
-  this example, 0.01 for 32. The figure depends on the embedding; it grows
-  with the scatter of the similarities between pairs of units.
+  length. The value for one text is less precise when the text is short:
+  between texts of the same kind, local coherence has a standard deviation
+  of 0.06 with four units and of 0.02 with 32. Local coherence is the mean
+  of the similarities between consecutive units, three of them for a text
+  of four units, and part of that variation comes from the order of the
+  units alone. The standard deviation over orders,
+  `local_coherence_shuffled_sd`, states that part for each text: 0.03 on
+  average for four units in this example, 0.01 for 32. These figures depend
+  on the embedding; they grow with the scatter of the similarities between
+  pairs of units.
 * **Global coherence increases with the number of units**, from 0.62 to
   0.70 here, although nothing else differs between the texts. Each unit is
   compared with the centroid of the others, which is a noisier estimate of
@@ -111,9 +120,11 @@ For a study of short texts, this suggests the following.
 * The difference between local coherence and its reference level, divided
   by the standard deviation over orders, has mean zero and standard
   deviation one when the order is random, whatever the number of units. It
-  puts texts of different lengths on one scale. It is undefined when the
-  standard deviation is zero, and its distribution is not normal with few
-  units.
+  says how far the order of a text is from a random one, as a test
+  statistic does. For texts that are ordered in the same way it grows with
+  the number of units, so that it does not put texts of different lengths
+  on one scale. It is undefined when the standard deviation is zero, and
+  its distribution is not normal with few units.
 * Where the elicitation procedure provides a reference, such as a question,
   use reference coherence.
 * One short text supports no conclusion. The precision of a comparison
@@ -154,55 +165,78 @@ below one however distinct the two topics are: at most 87.5% with seven
 units and 50% with six. This holds for this test and for any other of the
 same kind.
 
-The test has a further limit of its own, which comes from its blocks: one
-side of a valley is made of two blocks, and both fit within a topic only if
-the topic has twice as many units as a block. For two groups of identical
-units the statistic can be computed for every arrangement of the units,
-which gives the smallest p-value that the ordered text can receive (see
-[validation.md](validation.md), section 4).
+The test has a further limit of its own, which comes from the way it
+measures a change. It compares blocks of `block_size` units and more on
+either side of each gap between two units, and looks for a valley: a gap at
+which the similarity of the two blocks is low, with higher similarity on
+both sides (see [metrics.md](metrics.md), section 6). One side of a valley
+is made of two blocks, and both fit within a topic only if the topic has
+twice as many units as a block. For two groups of identical units the
+statistic can be computed for every arrangement of the units, which gives
+the p-value that the ordered text would receive if every reordering were
+examined (see [validation.md](validation.md), section 4).
 
-| Text | Block size | Smallest possible p-value |
+| Text | Block size | p-value with every reordering examined |
 |---|---:|---:|
 | 3 + 3 units | 2 | 0.200 |
 | 4 + 4 units | 2 | 0.029 |
+| 5 + 5 units | 2 | 0.048 |
+| 5 + 6 units | 2 | 0.056 |
 | 4 + 4 units | 3 | 0.057 |
 | 5 + 5 units | 3 | 0.008 |
 | 6 + 6 units | 3 | 0.002 |
 
-With the default blocks of three units, two groups of four identical units
-cannot be told apart at the 5% level, because two other arrangements of the
-same units reach the statistic of the ordered text. With blocks of two units
-they can. When the units of a topic differ from one another, as they do in a
-text, the comparison between arrangements is no longer the same, and the
-ordered text is found in some cases, as the simulation shows.
+With the default block size of 3, two groups of four identical units are at
+the limit of what the test can separate at the 5% level: two other
+arrangements of the same units have a larger statistic than the ordered
+text. With a block size of 2 they are within it. The table also shows that a
+smaller block is not always better: five and five units are separated more
+easily with a block size of 3, and with a block size of 2, five and six
+units are not separated at the 5% level, although five and five are.
+
+The library does not examine every reordering. It draws them at random, and
+the p-value it returns varies with the seed around the value of the table:
+for 4 + 4 identical units and the default settings, it is at or below 0.05
+for 5 seeds out of 40. When the units of a topic differ from one another, as
+they do in a text, the comparison between arrangements is no longer the same
+either. The simulation below shows what results.
 
 ### What the test finds in texts of 8 to 16 units
 
 The figures below are those of the simulation reported in
-[validation.md](validation.md), section 4, for three settings that go from
-distinct topics to closely related ones. With the default blocks of three
-units:
+[validation.md](validation.md), section 4. Its sequences are synthetic
+vectors, not text, in three settings that go from distinct topics to closely
+related ones. With the default block size of 3:
 
-* two topics of six units each are separated at the right place in 98%, 82%
-  and 40% of cases;
-* two topics of four units each in 53%, 42% and 22%;
-* a boundary four units from the start of a text of 12 units in at most 7%.
+* two topics of six units each are separated at the right place in 98%, 78%
+  and 39% of sequences;
+* two topics of five units each in 80%, 57% and 28%;
+* two topics of four units each in 53%, 38% and 22%;
+* a boundary four units from the start of a sequence of 12 units in at most
+  8%.
 
-With blocks of two units (`block_size=2`), segments of four units are found
-far more often: in 88%, 51% and 22% of cases for 4 + 4 units, and in 86%,
-53% and 17% for 4 + 8 units. Two topics of six units are then separated a
-little less often, in 93%, 71% and 31% of cases.
+With a block size of 2 (`block_size=2`), segments of four units are found
+more often: in 87%, 46% and 22% of sequences for 4 + 4 units, and in 87%,
+50% and 16% for 4 + 8 units. Longer segments are then found less often: 75%,
+39% and 18% for 5 + 5 units and 91%, 68% and 34% for 6 + 6.
 
 Where no boundary should be reported, the two block sizes give rates of the
-same order. One unrelated unit in the middle of a text of 12 units is
-reported as a boundary in 9% to 14% of cases, two adjacent unrelated units
-in 29% to 46%, and a drift through the 12 units in at most 3%.
+same order. One unrelated unit in the middle of a sequence of 12 units is
+reported as a boundary in 10% to 14% of sequences, two adjacent unrelated
+units in 27% to 44%, and a drift through the 12 units in at most 3%.
 
-For texts of this length, then: the test finds a clear change between two
-topics of at least six units; for topics of four or five units, blocks of
-two units find more of the changes and still miss many unless the topics
-are very distinct; and a digression of two units is often reported as a
-boundary. When the positions of the changes are known, supply them.
+In these simulations, then, the test finds a clear change between two topics
+of at least six units; for topics of four units a block size of 2 finds more
+of the changes, and still misses many unless the topics are very distinct;
+and a digression of two units is often reported as a boundary.
+
+All these figures concern sequences in which the units of a topic are drawn
+independently of one another. In speech, consecutive units are usually more
+alike than distant ones, and the test then also reports boundaries where the
+topic does not change: in simulated sequences of 24 units on one topic, in
+10% to 14% of cases ([metrics.md](metrics.md), section 6). For short
+samples, as for long ones, the positions of the changes are best supplied,
+and an estimated boundary should be reported as an estimate.
 
 ## 5. References
 

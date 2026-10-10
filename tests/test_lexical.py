@@ -201,6 +201,9 @@ def test_case_handling_changes_types() -> None:
     kept = lexical_diversity("The the THE cat", window=4, casefold=False)
     assert folded.n_types == 2
     assert kept.n_types == 4
+    # The option is returned with the result.
+    assert folded.casefold is True
+    assert kept.casefold is False
 
 
 def test_excluded_tokens_do_not_count() -> None:
@@ -211,6 +214,24 @@ def test_excluded_tokens_do_not_count() -> None:
     assert removed.n_tokens == 7
     assert removed.n_types == 6
     assert removed.mattr == mattr(["so", "the", "cat", "sat", "on", "the", "mat"], 3)
+    # The excluded tokens are returned with the result, as they were
+    # compared with the text: normalised, and in alphabetical order.
+    assert kept.excluded == ()
+    assert removed.excluded == ("uh", "um")
+    from_an_iterator = lexical_diversity(
+        text, window=3, exclude=(entry for entry in ("UM", "Uh", "um"))
+    )
+    assert from_an_iterator == removed
+    assert lexical_diversity(
+        text, window=3, casefold=False, exclude=["Um"]
+    ).excluded == ("Um",)
+
+
+def test_invalid_exclusions_are_reported_as_by_the_tokeniser() -> None:
+    with pytest.raises(TypeError, match="not a single string"):
+        lexical_diversity("some text", exclude="um")
+    with pytest.raises(ValueError, match="single tokens"):
+        lexical_diversity("some text", exclude=["two words"])
 
 
 def test_result_is_immutable() -> None:

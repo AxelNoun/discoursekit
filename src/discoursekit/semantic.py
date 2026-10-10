@@ -36,10 +36,13 @@ Reference coherence
     same prompt (Hoffman et al., 2018).
 
 Topic boundaries
-    Positions where the content changes abruptly and durably. They can be
-    supplied, when the elicitation procedure defines them, or estimated with
-    a permutation test built on the block comparison of TextTiling (Hearst,
-    1997). See :func:`segment_topics`.
+    Positions where the content changes abruptly and durably. They are best
+    supplied, when the elicitation procedure defines them. They can also be
+    estimated with :func:`segment_topics`, a permutation test built on the
+    block comparison of TextTiling (Hearst, 1997), whose level holds only
+    when, without a change of topic, every order of the units would be
+    equally likely; consecutive units of coherent text are usually more
+    alike than that.
 
 Coherence within segments
     Local and global coherence computed inside the segments delimited by the
@@ -134,6 +137,17 @@ _CHUNK = 2**22
 # does (Hearst, 1997, section 5.2.1).
 _LARGEST_BLOCK = 4
 
+# Before block sums are taken, similarities are rounded to multiples of two to
+# the power minus this number, about 1e-12, and held as integers (see
+# _similarity_counts).
+_SIMILARITY_BITS = 40
+
+# A block of k units has a direction when the sum of the k * k similarities
+# between its units, which is the squared length of their sum, exceeds k * k
+# times two to the power of this number, in the integers in which
+# similarities are held (see _block_similarities).
+_DIRECTION_BITS = 20
+
 
 # Input
 
@@ -153,9 +167,17 @@ def _to_unit_length(vectors: Vectors) -> Vectors:
     return np.asarray(scaled / norms, dtype=np.float64)
 
 
+def _real_array(values: ArrayLike, name: str) -> Vectors:
+    """Convert to double precision. Complex numbers are refused, not truncated."""
+    given = np.asarray(values)
+    if np.iscomplexobj(given):
+        raise TypeError(f"{name} must be real numbers, got complex numbers")
+    return np.asarray(given, dtype=np.float64)
+
+
 def _unit_vectors(embeddings: ArrayLike) -> Vectors:
     """Validate the embeddings and scale each row to unit length."""
-    vectors = np.asarray(embeddings, dtype=np.float64)
+    vectors = _real_array(embeddings, "embeddings")
     if vectors.ndim == 1 and vectors.size == 0:
         return vectors.reshape(0, 0)
     if vectors.ndim != 2:
@@ -181,7 +203,7 @@ def _reference_vector(reference: ArrayLike, dimensions: int | None) -> Vectors:
     ``dimensions`` is the number of dimensions of the embeddings, or ``None``
     when there are no units from which it could be known.
     """
-    vector = np.asarray(reference, dtype=np.float64)
+    vector = _real_array(reference, "reference")
     if vector.ndim != 1:
         raise ValueError(
             f"reference must be a single vector, got {vector.ndim} dimension(s)"
@@ -362,30 +384,91 @@ def _mean_defined(values: Vectors) -> float:
 # Topic boundaries
 
 
-def _area_table(gram: Vectors) -> Vectors:
-    """Summed-area table of a matrix of similarities.
+Counts = NDArray[np.int64]
 
-    ``table[a, b]`` is the sum of ``gram[:a, :b]``, so that the sum of any
-    rectangular block of ``gram`` is obtained from four entries.
+
+def _similarities(unit: Vectors) -> Vectors:
+    """Cosine similarities between all pairs of units.
+
+    Two units have one similarity, whichever of them comes first, and units
+    whose vectors are equal have the same similarities, to the last digit. A
+    product of matrices promises neither: it can return the same number with
+    a different last digit at two places of its result, and reorderings that
+    only exchange equal units would then not be recognised as equivalent.
+    The similarities kept are those of the upper triangle of the product,
+    and every unit takes those of the first unit equal to it.
     """
-    n = gram.shape[0]
-    table = np.zeros((n + 1, n + 1))
-    table[1:, 1:] = gram.cumsum(axis=0).cumsum(axis=1)
+    gram = np.asarray(unit @ unit.T, dtype=np.float64)
+    if unit.shape[0] < 2:
+        return gram
+    gram = np.triu(gram) + np.triu(gram, 1).T
+    _, first, inverse = np.unique(unit, axis=0, return_index=True, return_inverse=True)
+    if first.size < unit.shape[0]:
+        same = first[inverse.reshape(-1)]
+        gram = gram[np.ix_(same, same)]
+    return gram
+
+
+def _similarity_bits(n_units: int) -> int:
+    """Return the number of binary places kept when similarities are counted.
+
+    Forty for up to 2,048 units. The sum of all the similarities, which can
+    reach the square of the number of units, must fit in 64 bits: beyond
+    2,048 units, two places are given up each time the number of units
+    doubles.
+    """
+    return min(_SIMILARITY_BITS, 62 - 2 * max(n_units - 1, 1).bit_length())
+
+
+def _similarity_counts(gram: Vectors) -> tuple[Counts, float]:
+    """Express similarities as whole numbers of a small unit.
+
+    Returns the similarities as integers and the unit they count. Sums of
+    floating-point similarities taken from a summed-area table carry a
+    rounding error that grows with the size of the table, and the error
+    differs from one arrangement of the units to another. Sums of integers
+    are exact: two arrangements that hold the same similarities in the blocks
+    compared have exactly the same block similarities.
+
+    The unit is two to the power -40, about 1e-12, which is far below any
+    difference between two texts. It is larger when more than 2,048 units
+    are examined together (see ``_similarity_bits``).
+    """
+    bits = _similarity_bits(gram.shape[0])
+    counts = np.rint(gram * 2.0**bits).astype(np.int64)
+    return counts, 2.0**-bits
+
+
+def _area_table(counts: Counts) -> Counts:
+    """Summed-area table of a matrix of similarities held as integers.
+
+    ``table[a, b]`` is the sum of ``counts[:a, :b]``, so that the sum of any
+    rectangular block of ``counts`` is obtained from four entries.
+    """
+    n = counts.shape[0]
+    table = np.zeros((n + 1, n + 1), dtype=np.int64)
+    table[1:, 1:] = counts.cumsum(axis=0).cumsum(axis=1)
     return table
 
 
-def _block_similarities(table: Vectors, block_size: int) -> tuple[Vectors, Vectors]:
+def _block_similarities(
+    table: Counts, unit: float, block_size: int
+) -> tuple[Vectors, Vectors]:
     """Two similarities between the blocks before and after each candidate gap.
 
-    ``table`` is the summed-area table of the similarities between units.
-    Candidate gap ``j`` lies before unit ``block_size + j``. Only gaps with a
-    full block of ``block_size`` units on each side are candidates, so there
-    are ``n_units - 2 * block_size + 1`` of them.
+    ``table`` is the summed-area table of the similarities between units,
+    counted in multiples of ``unit``. Candidate gap ``j`` lies before unit
+    ``block_size + j``. Only gaps with a full block of ``block_size`` units
+    on each side are candidates, so there are
+    ``n_units - 2 * block_size + 1`` of them.
 
     The first similarity is the cosine between the sums of the two blocks:
     the sum of the similarities between a unit of one block and a unit of the
     other, divided by the geometric mean of the sums of the similarities
-    inside each block. It compares the directions of the two blocks. The
+    inside each block. It compares the directions of the two blocks, and is
+    taken to be zero when the units of a block cancel one another out: when
+    the mean of its units is shorter than about a thousandth of a unit, the
+    direction of their sum cannot be told from the rounded similarities. The
     second is the mean similarity between a unit of one block and a unit of
     the other. It also depends on how alike the units of each block are: two
     blocks that mix two contents in the same proportions point in the same
@@ -406,13 +489,26 @@ def _block_similarities(table: Vectors, block_size: int) -> tuple[Vectors, Vecto
     first = slice(0, n_gaps)
     second = slice(k, k + n_gaps)
     third = slice(2 * k, 2 * k + n_gaps)
-    cross = near[second] - far[first] - main[second] + near[first]
-    before = main[second] - 2.0 * near[first] + main[first]
-    after = main[third] - 2.0 * near[second] + main[second]
-    norms = np.sqrt(np.maximum(before * after, 0.0))
+    # Exact sums, converted to floating point only once they are complete.
+    # Each difference in brackets is itself the sum of a rectangle of
+    # similarities, so that no intermediate result exceeds 64 bits.
+    cross = (near[second] - far[first]) - (main[second] - near[first])
+    before = (main[second] - near[first]) - (near[first] - main[first])
+    after = (main[third] - near[second]) - (near[second] - main[second])
+    # The sum of the k * k similarities inside a block is the squared length
+    # of the sum of its units, and each similarity is within half a count of
+    # its true value. Above the bound below, that sum is known to better than
+    # one part in a million, and so is the cosine. With similarities counted
+    # in units of two to the power -40, the bound is reached when the mean of
+    # the units of the block has a length of two to the power -10. Below it
+    # the units cancel one another out, to within what the counts can tell.
+    shortest = (k * k) << _DIRECTION_BITS
+    has_direction = (before > shortest) & (after > shortest)
+    norms = np.sqrt(np.maximum((before * unit) * (after * unit), 0.0))
     of_sums = np.zeros(n_gaps)
-    np.divide(cross, norms, out=of_sums, where=norms > 0)
-    between_units = np.asarray(cross / (k * k), dtype=np.float64)
+    np.divide(cross * unit, norms, out=of_sums, where=has_direction)
+    np.clip(of_sums, -1.0, 1.0, out=of_sums)
+    between_units = np.asarray(cross * unit / (k * k), dtype=np.float64)
     return of_sums, between_units
 
 
@@ -438,17 +534,22 @@ def _rises(similarities: Vectors) -> tuple[Vectors, Vectors]:
 def _block_sizes(n_units: int, block_size: int) -> list[int]:
     """Block sizes at which a segment of ``n_units`` units is examined.
 
-    From ``block_size`` up to four times ``block_size``, without exceeding a
-    quarter of the segment, in steps of one tenth of the current size (at
-    least one). A size is kept only if it leaves at least three candidate
-    gaps, the minimum for a valley to have two sides.
+    The smallest is ``block_size``. The largest is four times ``block_size``
+    or a quarter of the segment, whichever is smaller, and never less than
+    ``block_size``. Between the two, the sizes go up in steps of one tenth of
+    the current size (at least one). No size is examined when ``block_size``
+    itself leaves fewer than three candidate gaps, the minimum for a valley
+    to have two sides.
     """
     largest = max(block_size, min(n_units // 4, _LARGEST_BLOCK * block_size))
+    if n_units - 2 * largest + 1 < 3:
+        return []  # then block_size is the only size, and it leaves no room
     sizes = []
     size = block_size
-    while size <= largest and n_units - 2 * size + 1 >= 3:
+    while size < largest:
         sizes.append(size)
         size += max(1, size // 10)
+    sizes.append(largest)
     return sizes
 
 
@@ -461,6 +562,8 @@ def _size_pairs(sizes: list[int]) -> tuple[NDArray[np.intp], NDArray[np.intp]]:
     rise on the left is complete for blocks of at most ``min(a / 2, b)``
     units and the rise on the right for blocks of at most ``min(b / 2, a)``
     units, and neither of these two numbers is more than twice the other.
+    Rounded down to whole units, the second can exceed twice the first by
+    one; the pair examined then has a block one unit smaller on that side.
     The pairs come in mirror images: if ``(s, t)`` is kept, so is ``(t, s)``.
     """
     pairs = [
@@ -475,82 +578,80 @@ def _size_pairs(sizes: list[int]) -> tuple[NDArray[np.intp], NDArray[np.intp]]:
 
 
 def _valley_depths(
-    table: Vectors,
+    table: Counts,
+    unit: float,
     sizes: list[int],
     on_the_left: NDArray[np.intp],
     on_the_right: NDArray[np.intp],
-) -> tuple[Vectors, NDArray[np.intp]]:
-    """Depths and position of the candidate boundary, for each pair of block sizes.
+) -> Vectors:
+    """Depth of the valley at every gap, for each pair of block sizes.
 
-    ``table`` is the summed-area table of the similarities between units.
-    Each block size has two curves, one for each of the two block
-    similarities. For a pair of sizes, the candidate is the gap at which the
-    four curves of the pair are lowest together: the gap that minimises the
-    sum of the four similarities, among those that the curves of both sizes
-    cover. On each of the two similarities, its depth is the smaller of the
-    rise on its left, measured on the curve of the first size, and the rise
-    on its right, measured on the curve of the second. A depth is zero when a
-    rise is missing or negative: a valley has two sides.
+    ``table`` is the summed-area table of the similarities between units,
+    counted in multiples of ``unit``. Each block size has two curves, one
+    for each of the two block similarities. For a pair of sizes and one
+    similarity, the depth of a gap is the smaller of the rise on its left,
+    measured on the curve of the first size, and the rise on its right,
+    measured on the curve of the second. It is zero when a rise is missing
+    or negative, and at the gaps that the curves of both sizes do not cover:
+    a valley has two sides.
 
-    Returns the depths, one row for each similarity and one column for each
-    pair, and the positions, each the index of the first unit after the gap.
+    Returns an array with one row for each similarity, one column for each
+    pair and one entry for the gap before each unit.
     """
     n = table.shape[0] - 1
     shape = (2, len(sizes), n + 1)
-    curves = np.full(shape, np.inf)
     left = np.full(shape, -np.inf)
     right = np.full(shape, -np.inf)
     for row, size in enumerate(sizes):
         # The curves of this size have one point per gap from size to n - size.
         gaps = slice(size, n - size + 1)
-        for measure, similarities in enumerate(_block_similarities(table, size)):
-            curves[measure, row, gaps] = similarities
+        curves = _block_similarities(table, unit, size)
+        for measure, similarities in enumerate(curves):
             left[measure, row, gaps], right[measure, row, gaps] = _rises(similarities)
-    together = curves.sum(axis=0)
-    positions = (together[on_the_left] + together[on_the_right]).argmin(axis=1)
-    depths = np.minimum(
-        left[:, on_the_left, positions], right[:, on_the_right, positions]
-    )
-    return np.maximum(depths, 0.0), positions
+    depths = np.minimum(left[:, on_the_left], right[:, on_the_right])
+    return np.maximum(depths, 0.0)
 
 
 def _scores(
-    depths: Vectors, mirror: NDArray[np.intp], rounding: float
-) -> tuple[Vectors, NDArray[np.intp], float] | None:
+    depths: Vectors, mirror: NDArray[np.intp]
+) -> tuple[Vectors, NDArray[np.intp], Vectors, float] | None:
     """Put the depths of every arrangement on one scale and add the two measures.
 
-    ``depths`` has one row for each block similarity, one column for each
-    pair of block sizes and one layer for each arrangement of the units. The
-    depths of a pair, on one similarity, are standardised with their mean
-    and standard deviation over all the arrangements. A pair and its mirror
-    image, which exchanges left and right and is found at index ``mirror``,
-    have the same distribution over reorderings and share one mean and one
-    standard deviation, so that a text read backwards has the same
-    standardised depths. Depths that are the same in every arrangement, to
-    within ``rounding``, say nothing: they count for zero, and a pair is left
+    ``depths`` holds the depth of the deepest valley: one row for each block
+    similarity, one column for each pair of block sizes and one layer for
+    each arrangement of the units. The depths of a pair, on one similarity,
+    are standardised with their mean and standard deviation over all the
+    arrangements. A pair and its mirror image, which exchanges left and
+    right and is found at index ``mirror``, have the same distribution over
+    reorderings and share one mean and one standard deviation: with every
+    reordering examined, a text and the same text read backwards have the
+    same standardised depths. Depths that are the same in every arrangement,
+    to within rounding, say nothing: they count for zero, and a pair is left
     out when this is so on both similarities.
 
     Returns the scores, one row for each pair kept and one column for each
     arrangement, each the sum of the two standardised depths; the indices of
-    the pairs kept; and the margin within which two scores are equal.
-    Returns ``None`` if no depth varies between arrangements.
+    the pairs kept; the weights, one row for each similarity and one column
+    for each pair, by which a depth is multiplied when it is standardised;
+    and the margin within which two scores are equal. Returns ``None`` if no
+    depth varies between arrangements.
     """
     means = (depths.mean(axis=2) + depths.mean(axis=2)[:, mirror]) / 2.0
-    squares = np.square(depths).mean(axis=2)
-    spreads = np.sqrt(np.maximum((squares + squares[:, mirror]) / 2.0 - means**2, 0.0))
-    varying = spreads > rounding
+    # The spread is computed from the deviations, not from the mean of the
+    # squares: depths that are the same in every arrangement then have a
+    # spread of zero, and not the rounding error of a difference.
+    deviations = depths - means[:, :, np.newaxis]
+    squares = np.square(deviations).mean(axis=2)
+    spreads = np.sqrt((squares + squares[:, mirror]) / 2.0)
+    varying = spreads > _ROUNDING
     kept = np.flatnonzero(varying.any(axis=0))
     if kept.size == 0:
         return None
-    standard = np.zeros(depths.shape)
-    np.divide(
-        depths - means[:, :, np.newaxis],
-        spreads[:, :, np.newaxis],
-        out=standard,
-        where=varying[:, :, np.newaxis],
-    )
-    margin = 2.0 * rounding / float(spreads[varying].min())
-    return standard[:, kept].sum(axis=0), kept, margin
+    weights = np.zeros(spreads.shape)
+    np.divide(1.0, spreads, out=weights, where=varying)
+    standard = deviations * weights[:, :, np.newaxis]
+    margin = 2.0 * _ROUNDING * float(weights.max())
+    return standard[:, kept].sum(axis=0), kept, weights, margin
 
 
 def _test_segment(
@@ -559,13 +660,14 @@ def _test_segment(
     n_permutations: int,
     bit_generator: np.random.PCG64,
 ) -> tuple[int, int] | None:
-    """Compare the valley of one segment with those of random reorderings.
+    """Compare the deepest valley of one segment with those of random reorderings.
 
     ``gram`` holds the similarities between the units of the segment. Returns
     ``(position, reached)``: the index, within the segment, of the first unit
     after the candidate boundary, and the number of reorderings whose
     statistic is at least the observed one. Returns ``None`` if the segment
-    is too short to be examined or if no reordering changes the depths.
+    is too short to be examined, if no reordering changes the depths, or if
+    the observed order has no valley.
     """
     n = gram.shape[0]
     sizes = _block_sizes(n, block_size)
@@ -575,43 +677,52 @@ def _test_segment(
     # The pairs are listed in increasing order of (left, right). Sorting them
     # by (right, left) puts the mirror image of each pair at its position.
     mirror = np.lexsort((on_the_left, on_the_right))
+    counts, unit = _similarity_counts(gram)
 
     # Layer 0 is the observed order; the others are random reorderings.
-    depths = np.empty((2, on_the_left.size, n_permutations + 1))
-    positions = np.zeros(on_the_left.size, dtype=np.intp)
+    deepest = np.empty((2, on_the_left.size, n_permutations + 1))
+    observed = np.zeros((2, on_the_left.size, n + 1))
     for arrangement in range(n_permutations + 1):
         if arrangement == 0:
-            table = _area_table(gram)
+            table = _area_table(counts)
         else:
             # The raw output of the bit generator is stable across NumPy
             # versions, so a seed gives the same permutations everywhere.
             order = np.argsort(bit_generator.random_raw(n), kind="stable")
-            table = _area_table(gram[np.ix_(order, order)])
-        depths[:, :, arrangement], found = _valley_depths(
-            table, sizes, on_the_left, on_the_right
-        )
+            table = _area_table(counts[np.ix_(order, order)])
+        depths = _valley_depths(table, unit, sizes, on_the_left, on_the_right)
+        deepest[:, :, arrangement] = depths.max(axis=2)
         if arrangement == 0:
-            positions = found
+            observed = depths
 
-    # Two depths closer than this are equal to within rounding error, which
-    # grows with the number of similarities summed. The mean and the standard
-    # deviation of the depths are taken over all arrangements including the
-    # observed one, which keeps the observed order exchangeable with the
-    # others under the null.
-    scored = _scores(depths, mirror, _ROUNDING * n)
+    # The mean and the standard deviation of the depths are taken over all
+    # arrangements including the observed one, which keeps the observed order
+    # exchangeable with the others under the null.
+    scored = _scores(deepest, mirror)
     if scored is None:
         return None  # units that are all alike have no boundary
-    scores, kept, margin = scored
+    scores, kept, weights, margin = scored
     strongest = scores.max(axis=0)
 
     # A reordering can have exactly the depths of the observed order: its
     # mirror image does, and so does one that leaves the blocks around the
-    # valley in place. Such ties count as reaching the observed statistic.
-    # They are frequent in short segments, and rounding error must not
-    # break them. If the observed order has no valley, its depths are zero,
-    # the least a depth can be, and every reordering reaches its statistic.
+    # valley in place. Such ties count as reaching the observed statistic,
+    # and they are frequent in short segments. The block sums are exact, so
+    # that equal depths are equal to the last digit; the margin covers what
+    # the few operations after the sums can add.
     reached = int((strongest[1:] >= strongest[0] - margin).sum())
-    return int(positions[kept[int(np.argmax(scores[:, 0]))]]), reached
+
+    # The candidate boundary: for the pair of sizes that gives the observed
+    # statistic, the gap whose two depths, on their common scale, add up to
+    # the most. Where several pairs or several gaps are equal to within the
+    # margin, the first is taken.
+    pair = kept[int(np.argmax(scores[:, 0] >= strongest[0] - margin))]
+    on_one_scale = (observed[:, pair] * weights[:, pair, np.newaxis]).sum(axis=0)
+    largest = float(on_one_scale.max())
+    if largest <= 0.0:
+        return None  # the observed order has no valley
+    among = (on_one_scale > 0.0) & (on_one_scale >= largest - margin)
+    return int(np.argmax(among)), reached
 
 
 @dataclass(frozen=True)
@@ -635,7 +746,8 @@ class TopicSegmentation:
     tested
         Whether the text was long enough to be tested, that is, had at least
         ``2 * block_size + 2`` units. If false, the absence of boundaries
-        says nothing about the text.
+        says nothing about the text. It is true for a text of that length
+        even when its units are all alike and leave nothing to compare.
     block_size, alpha, n_permutations, seed
         Parameters of the test. Report them with the result.
     """
@@ -665,7 +777,7 @@ def _segments(n_units: int, boundaries: Sequence[int]) -> tuple[tuple[int, int],
 def _segment(unit: Vectors, parameters: _TestParameters) -> TopicSegmentation:
     n = unit.shape[0]
     n_permutations = parameters.n_permutations
-    gram = unit @ unit.T
+    gram = _similarities(unit)
     bit_generator = np.random.PCG64(parameters.seed)
     p_values: dict[int, float] = {}
     # Parts of the text still to be examined, in the order in which they were
@@ -719,6 +831,19 @@ def segment_topics(
 ) -> TopicSegmentation:
     """Test for abrupt and durable changes of topic in a sequence of units.
 
+    What the level covers. The test compares the observed order with random
+    reorderings of the same units. Its level is ``alpha`` when, without a
+    change of topic, every order of the units would be equally likely
+    (exchangeability). In coherent text consecutive units are usually more
+    alike than units further apart, and the test then reports boundaries
+    more often than ``alpha`` in texts that have none: in simulated
+    sequences on one topic whose consecutive units were related, in 10% to
+    14% of sequences of 24 units and in 18% to 48% of sequences of 48 units
+    (``docs/validation.md``). A reported boundary shows that the order
+    departs from exchangeability at that place; it does not by itself show
+    a change of topic. Supply the boundaries when the elicitation procedure
+    defines them.
+
     Block similarities. For a block size ``s`` and each gap between two units
     with ``s`` units on both sides, two similarities are computed between the
     ``s`` units before the gap and the ``s`` units after it. The first is the
@@ -732,20 +857,25 @@ def segment_topics(
 
     Depth. The two sides of a valley are measured with block sizes that may
     differ, since a boundary close to one end of a text leaves room for small
-    blocks only on that side. For a pair of sizes, the candidate boundary is
-    the gap at which the similarities are lowest together, that is, where
-    the sum of the two similarities at the two sizes is smallest. On each
-    similarity, the rise on its left is the highest value found at an earlier
-    gap minus the value at the candidate, both for blocks of the first size;
-    the rise on its right is defined in the same way with later gaps and the
-    second size. The depth is the smaller of the two rises, and zero if one
-    of them is missing.
+    blocks only on that side. For a pair of sizes and one similarity, the
+    rise on the left of a gap is the highest value found at an earlier gap
+    minus the value at the gap, both for blocks of the first size; the rise
+    on its right is defined in the same way with later gaps and the second
+    size. The depth of the gap is the smaller of the two rises, and zero if
+    one of them is missing or negative. The depth retained for the pair is
+    that of its deepest valley, the largest depth over the gaps.
 
     Statistic. Block sizes go from ``block_size`` to four times
-    ``block_size``, without exceeding a quarter of the number of units.
-    For every pair of sizes in which neither is more than twice the other,
-    the depths on the two similarities are each put on a common scale and
-    added. The largest sum is the statistic.
+    ``block_size``, or to a quarter of the units of the part under test
+    where that is less, and never below ``block_size``, in steps of one
+    tenth of the current size (at least one unit). For every pair of these
+    sizes in which neither is more than twice the other, the depths of the
+    deepest valley on each of the two similarities are put on a common scale
+    and added. The largest sum is the statistic. The two valleys are sought
+    separately: at a marked change of topic they lie at the same gap, and
+    elsewhere they need not. The candidate boundary is, for the pair that
+    gives the statistic, the gap at which the depths on the two
+    similarities, on that common scale, add up to the most.
 
     Test. The statistic is recomputed on ``n_permutations`` random
     reorderings of the units. The p-value is ``(1 + b) / (1 + B)``, where
@@ -754,7 +884,8 @@ def segment_topics(
     equal to within rounding error count as equal. A boundary is reported
     when the p-value is at most the level of the test. If every order of the
     units is equally likely (exchangeability), the probability of reporting a
-    boundary is at most ``alpha``.
+    boundary is at most ``alpha``, the probability being taken over the texts
+    and over the draw of the reorderings.
 
     Subdivision. When a boundary is found, the two parts are examined in the
     same way, with reorderings confined to each part, until no further
@@ -771,9 +902,10 @@ def segment_topics(
         Array of shape ``(n_units, n_dimensions)``, one row per unit, in
         order.
     block_size
-        Smallest number of units compared on each side of a gap; the largest
-        is four times this number. It sets the scale of the analysis. A
-        boundary is never placed within ``block_size`` units of either end
+        Smallest number of units compared on each side of a gap. It sets the
+        scale of the analysis: the largest block is four times this number
+        in a part of at least ``16 * block_size`` units.
+        A boundary is never placed within ``block_size`` units of either end
         of the part under test, so every segment has more than
         ``block_size`` units, and a change of topic that takes much longer
         to complete than the largest block is not reported.
@@ -785,7 +917,9 @@ def segment_topics(
         of the text is not examined.
     seed
         Seed of the random reorderings. The result is deterministic for a
-        given seed.
+        given seed. Texts of the same length tested with the same seed are
+        compared with the same reorderings: when many texts are analysed,
+        give each a seed of its own, for example its index, and record it.
 
     Returns
     -------
@@ -794,12 +928,12 @@ def segment_topics(
     Notes
     -----
     TextTiling gives every gap a depth score, the sum of the rises to the
-    nearest peak on each side (Hearst, 1997). The depth used here is
-    computed at the lowest point only; it takes the smaller of the two rises
-    instead of their sum, measures each rise to the highest point on that
-    side instead of the nearest peak, and lets the two rises be measured
-    with blocks of different sizes. A rise on one side only is therefore not
-    a valley, and the smoothing step of TextTiling is not needed.
+    nearest peak on each side (Hearst, 1997). The depth used here takes the
+    smaller of the two rises instead of their sum, measures each rise to the
+    highest point on that side instead of the nearest peak, and lets the two
+    rises be measured with blocks of different sizes. A rise on one side
+    only is therefore not a valley, and the smoothing step of TextTiling is
+    not needed. Only the deepest valley is tested.
 
     The two similarities complement each other. Two blocks that mix two
     topics in the same proportions have the same direction, so that the
@@ -808,21 +942,35 @@ def segment_topics(
     content varies, gradually or not.
 
     What the test does not report. A steady drift of content through the
-    text has no valley and gives no boundary. Low similarity scattered
+    text has no valley and is rarely reported. Low similarity scattered
     through the text is what random reorderings also produce. One or two
     units unrelated to their neighbours are not a topic; they lower the
     similarity of the blocks that contain them, however, and are sometimes
     reported as a boundary.
 
-    Power. The rise on one side of a boundary is complete when the segment
-    on that side has at least twice as many units as the blocks compared.
-    Power is limited for segments shorter than twice ``block_size``, in short
-    texts, and when the units of a topic are only weakly similar to one
-    another. ``docs/validation.md`` gives the rates observed on simulated
-    data for all these cases.
+    Power. With ``a`` units of one topic before a boundary and ``b`` units
+    of another after it, the blocks compared on its left each lie within one
+    topic up to a size of ``min(a / 2, b)``. Power is limited for segments
+    shorter than twice ``block_size``, in short texts, and when the units of
+    a topic are only weakly similar to one another. ``docs/validation.md``
+    gives the rates observed on simulated data for all these cases.
 
-    Memory. The computation holds the matrix of similarities between all
-    pairs of units, that is, ``n_units`` squared values.
+    Repeated units. Units whose embeddings are equal are given equal
+    similarities, and the sums of similarities are computed exactly, on
+    similarities rounded to about 1e-12 (more coarsely when more than 2,048
+    units are examined together). A reordering that only exchanges equal
+    units is then counted as reaching the observed statistic, whatever the
+    platform. Embeddings that differ, even in their last digit, are
+    different units: to have a repeated sentence count as one, embed each
+    distinct sentence once, as :class:`discoursekit.SentenceTransformerEmbedder`
+    does. When several gaps are equally good candidates, the first is taken.
+
+    Memory and time. The computation holds a few matrices of ``n_units``
+    squared values, about eight at its peak, and two arrays of
+    ``n_permutations + 1`` values for each pair of block sizes. The time of
+    one test grows with ``n_units`` squared and with ``n_permutations``:
+    with the default settings, about three minutes on one core for a text of
+    3,000 units, and more when boundaries are found and the parts tested.
 
     Examples
     --------
@@ -883,13 +1031,9 @@ class Coherence:
         units in segments of at least two units.
     boundaries
         Index of the first unit of each new segment used for the two
-        quantities above: those supplied by the caller, or those found by
-        :func:`segment_topics`.
+        quantities above, as supplied by the caller.
     n_units
         Number of units. Report it and use it as a covariate.
-    segmentation
-        Details of the test when the boundaries were estimated; ``None`` when
-        they were supplied.
     """
 
     local_coherence: float
@@ -901,7 +1045,6 @@ class Coherence:
     global_coherence_within_segments: float
     boundaries: tuple[int, ...]
     n_units: int
-    segmentation: TopicSegmentation | None
 
 
 def _check_boundaries(boundaries: Sequence[int], n_units: int) -> tuple[int, ...]:
@@ -935,11 +1078,7 @@ def coherence(
     embeddings: ArrayLike,
     *,
     reference: ArrayLike | None = None,
-    boundaries: Sequence[int] | None = None,
-    block_size: int = DEFAULT_BLOCK_SIZE,
-    alpha: float = DEFAULT_ALPHA,
-    n_permutations: int = DEFAULT_PERMUTATIONS,
-    seed: int = 0,
+    boundaries: Sequence[int] = (),
 ) -> Coherence:
     """Compute the semantic coherence of a sequence of units.
 
@@ -955,13 +1094,12 @@ def coherence(
         the question that was asked, or the average of the responses of
         other speakers to the same prompt.
     boundaries
-        Known changes of topic, as the index of the first unit of each new
-        segment, for example where a new question was asked. If ``None``
-        (default) they are estimated with :func:`segment_topics`. Pass an
-        empty sequence to treat the text as a single segment.
-    block_size, alpha, n_permutations, seed
-        Parameters of :func:`segment_topics`; ignored when ``boundaries`` is
-        given.
+        Changes of topic, as the index of the first unit of each new
+        segment, for example where a new question was asked. By default the
+        text is a single segment. Boundaries estimated with
+        :func:`segment_topics` can be passed here, as its field
+        ``boundaries``; read its notes on when its level holds before doing
+        so, and report that the boundaries were estimated.
 
     Returns
     -------
@@ -969,9 +1107,14 @@ def coherence(
 
     Notes
     -----
+    The boundaries are never estimated here. The test for boundaries can
+    report changes of topic in texts that have none when consecutive units
+    are related, as they are in coherent text; an estimate is therefore a
+    separate, explicit step.
+
     The standard deviation of local coherence over the orders of the units
-    is computed from the similarities between all pairs of units, so that
-    the time it takes grows with the square of their number.
+    is computed from the similarities between all pairs of units, a slice at
+    a time: its time grows with the square of the number of units.
 
     Examples
     --------
@@ -991,14 +1134,7 @@ def coherence(
     """
     unit = _unit_vectors(embeddings)
     n = unit.shape[0]
-
-    segmentation = None
-    if boundaries is None:
-        parameters = _check_test_parameters(block_size, alpha, n_permutations, seed)
-        segmentation = _segment(unit, parameters)
-        used = segmentation.boundaries
-    else:
-        used = _check_boundaries(boundaries, n)
+    used = _check_boundaries(boundaries, n)
 
     adjacent = _adjacent(unit)
     same_segment = np.ones(adjacent.size, dtype=bool)
@@ -1024,5 +1160,4 @@ def coherence(
         ),
         boundaries=used,
         n_units=n,
-        segmentation=segmentation,
     )
