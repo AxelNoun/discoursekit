@@ -24,7 +24,10 @@ from discoursekit.semantic import (
     _area_table,
     _block_similarities,
     _block_sizes,
-    _valley,
+    _rises,
+    _scores,
+    _size_pairs,
+    _valley_depths,
 )
 
 Array = NDArray[np.float64]
@@ -72,6 +75,10 @@ def test_hand_computed_values() -> None:
     assert result.local_coherence == pytest.approx((0.0 + half) / 2)
     # All three pairs: 0, cos 45, cos 45.
     assert result.local_coherence_shuffled == pytest.approx((0.0 + half + half) / 3)
+    # Of the six orders, the four that begin or end with north-east have a
+    # local coherence of half / 2 and the two others of half. The variance of
+    # these six values is half ** 2 / 18, so their standard deviation is 1/6.
+    assert result.local_coherence_shuffled_sd == pytest.approx(1 / 6)
     # East and north are each at 67.5 degrees from the sum of the other two;
     # north-east is aligned with the sum of east and north.
     to_rest = math.cos(3 * math.pi / 8)
@@ -90,6 +97,7 @@ def test_identical_units_are_perfectly_coherent() -> None:
     result = coherence([[2.0, 1.0, 3.0]] * 5, boundaries=())
     assert result.local_coherence == pytest.approx(1.0)
     assert result.local_coherence_shuffled == pytest.approx(1.0)
+    assert result.local_coherence_shuffled_sd == 0.0
     assert result.global_coherence == pytest.approx(1.0)
 
 
@@ -97,6 +105,7 @@ def test_mutually_orthogonal_units_have_zero_coherence() -> None:
     result = coherence(np.eye(4), boundaries=())
     assert result.local_coherence == pytest.approx(0.0)
     assert result.local_coherence_shuffled == pytest.approx(0.0)
+    assert result.local_coherence_shuffled_sd == 0.0
     assert result.global_coherence == pytest.approx(0.0)
 
 
@@ -115,6 +124,7 @@ def test_fewer_than_two_units_give_nan(embeddings: object) -> None:
     assert result.n_units in (0, 1)
     assert math.isnan(result.local_coherence)
     assert math.isnan(result.local_coherence_shuffled)
+    assert math.isnan(result.local_coherence_shuffled_sd)
     assert math.isnan(result.global_coherence)
     assert math.isnan(result.local_coherence_within_segments)
     assert math.isnan(result.global_coherence_within_segments)
@@ -126,6 +136,8 @@ def test_two_units() -> None:
     half = math.sqrt(0.5)
     assert result.local_coherence == pytest.approx(half)
     assert result.local_coherence_shuffled == pytest.approx(half)
+    # The two orders of two units have the same pair of consecutive units.
+    assert result.local_coherence_shuffled_sd == 0.0
     assert result.global_coherence == pytest.approx(half)
 
 
@@ -137,10 +149,11 @@ def units() -> Array:
     return rng(1).standard_normal((9, 6))
 
 
-def summary(result: Coherence) -> tuple[float, float, float]:
+def summary(result: Coherence) -> tuple[float, float, float, float]:
     return (
         result.local_coherence,
         result.local_coherence_shuffled,
+        result.local_coherence_shuffled_sd,
         result.global_coherence,
     )
 
@@ -167,6 +180,9 @@ def test_global_coherence_does_not_depend_on_order(units: Array) -> None:
         assert shuffled.local_coherence_shuffled == pytest.approx(
             reference.local_coherence_shuffled
         )
+        assert shuffled.local_coherence_shuffled_sd == pytest.approx(
+            reference.local_coherence_shuffled_sd
+        )
 
 
 def test_local_coherence_depends_on_order_but_not_on_direction(units: Array) -> None:
@@ -188,6 +204,59 @@ def test_shuffled_level_is_the_mean_over_all_orders() -> None:
     assert sum(over_all_orders) / 720 == pytest.approx(expected, abs=1e-12)
 
 
+@pytest.mark.parametrize("n_units", [2, 3, 4, 5, 6, 7])
+@pytest.mark.parametrize("dimensions", [2, 5])
+def test_shuffled_spread_is_the_standard_deviation_over_all_orders(
+    n_units: int, dimensions: int
+) -> None:
+    state = rng(60 + 10 * n_units + dimensions)
+    vectors = state.standard_normal((n_units, dimensions))
+    over_all_orders = [
+        coherence(vectors[list(order)], boundaries=()).local_coherence
+        for order in itertools.permutations(range(n_units))
+    ]
+    assert len(over_all_orders) == math.factorial(n_units)
+    result = coherence(vectors, boundaries=())
+    assert result.local_coherence_shuffled == pytest.approx(
+        float(np.mean(over_all_orders)), abs=1e-12
+    )
+    assert result.local_coherence_shuffled_sd == pytest.approx(
+        float(np.std(over_all_orders)), abs=1e-12
+    )
+
+
+def test_shuffled_spread_does_not_depend_on_how_the_pairs_are_accumulated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # In a long text the similarities are computed a slice of units at a time.
+    vectors = rng(70).standard_normal((50, 7))
+    expected = coherence(vectors, boundaries=()).local_coherence_shuffled_sd
+    assert expected > 0.01
+    for chunk in (1, 49, 50, 51, 120, 2500):
+        monkeypatch.setattr("discoursekit.semantic._CHUNK", chunk)
+        result = coherence(vectors, boundaries=())
+        assert result.local_coherence_shuffled_sd == pytest.approx(expected, abs=1e-14)
+
+
+def test_shuffled_spread_matches_random_orders() -> None:
+    # Thirty units on two topics. Over 4000 random orders, the standard error
+    # of the mean of local coherence is the standard deviation divided by 63,
+    # and that of the standard deviation about 1.1% of its value.
+    vectors = two_topics(14, n_each=15)
+    state = rng(71)
+    sampled = [
+        coherence(vectors[state.permutation(30)], boundaries=()).local_coherence
+        for _ in range(4000)
+    ]
+    result = coherence(vectors, boundaries=())
+    assert result.local_coherence_shuffled == pytest.approx(
+        float(np.mean(sampled)), abs=4 * result.local_coherence_shuffled_sd / 60
+    )
+    assert result.local_coherence_shuffled_sd == pytest.approx(
+        float(np.std(sampled)), rel=0.08
+    )
+
+
 def test_leaving_the_unit_out_removes_a_built_in_bias() -> None:
     # Five unrelated directions in a space of 2000 dimensions.
     unrelated = normalise(rng(5).standard_normal((5, 2000)))
@@ -197,6 +266,40 @@ def test_leaving_the_unit_out_removes_a_built_in_bias() -> None:
     centroid = unrelated.sum(axis=0)
     with_self = float(np.mean(unrelated @ centroid / np.linalg.norm(centroid)))
     assert with_self == pytest.approx(1 / math.sqrt(5), abs=0.05)
+
+
+def equally_similar(n_units: int, similarity: float) -> Array:
+    """Unit vectors with the same cosine similarity between all pairs."""
+    common = np.zeros(n_units + 1)
+    common[0] = 1.0
+    own = np.eye(n_units + 1)[1:]
+    return np.asarray(math.sqrt(similarity) * common + math.sqrt(1 - similarity) * own)
+
+
+@pytest.mark.parametrize("similarity", [0.2, 0.5])
+def test_global_coherence_grows_with_the_number_of_units(similarity: float) -> None:
+    # When every pair of units has the same similarity r, a unit and the sum
+    # of the n - 1 others have a similarity of
+    # sqrt(n - 1) r / sqrt(1 + (n - 2) r), which increases with n from r
+    # towards sqrt(r). Local coherence and its reference level stay at r.
+    previous = 0.0
+    for n_units in (2, 4, 8, 32, 128):
+        result = coherence(equally_similar(n_units, similarity), boundaries=())
+        expected = (
+            math.sqrt(n_units - 1)
+            * similarity
+            / math.sqrt(1 + (n_units - 2) * similarity)
+        )
+        assert result.global_coherence == pytest.approx(expected)
+        assert result.global_coherence > previous
+        assert result.local_coherence == pytest.approx(similarity)
+        assert result.local_coherence_shuffled == pytest.approx(similarity)
+        assert result.local_coherence_shuffled_sd == 0.0
+        previous = result.global_coherence
+    assert previous == pytest.approx(math.sqrt(similarity), abs=0.01)
+    assert coherence(
+        equally_similar(2, similarity), boundaries=()
+    ).global_coherence == pytest.approx(similarity)
 
 
 # Agreement of the summary with a direct implementation
@@ -210,6 +313,32 @@ def mean_or_nan(values: list[float]) -> float:
     return sum(values) / len(values) if values else math.nan
 
 
+def spread_over_orders_directly(unit: list[Array]) -> float:
+    """Standard deviation of local coherence over all orders, pair by pair.
+
+    In a random order of ``n`` units, two given units are consecutive with
+    probability ``2 / n``. Two pairs that share a unit are both consecutive
+    with probability ``2 / (n (n - 1))``, and two pairs without a common
+    unit with probability ``4 / (n (n - 1))``. The variance of the sum of the
+    similarities between consecutive units follows from the covariances of
+    these events, summed over every pair of pairs.
+    """
+    n = len(unit)
+    pairs = list(itertools.combinations(range(n), 2))
+    variance = 0.0
+    for first in pairs:
+        for second in pairs:
+            shared = len(set(first) & set(second))
+            both = (4 / (n * (n - 1)), 2 / (n * (n - 1)), 2 / n)[shared]
+            covariance = both - (2 / n) ** 2
+            variance += (
+                cosine(unit[first[0]], unit[first[1]])
+                * cosine(unit[second[0]], unit[second[1]])
+                * covariance
+            )
+    return math.sqrt(max(variance, 0.0)) / (n - 1)
+
+
 def summarise_directly(
     vectors: Array, boundaries: tuple[int, ...], reference: Array
 ) -> tuple[float, ...]:
@@ -219,6 +348,7 @@ def summarise_directly(
     segment = [sum(index >= boundary for boundary in boundaries) for index in indices]
     adjacent = [cosine(unit[i], unit[i + 1]) for i in indices[:-1]]
     pairs = [cosine(unit[i], unit[j]) for i in indices for j in indices if i < j]
+    spread = spread_over_orders_directly(unit)
     to_rest = [
         cosine(unit[i], np.sum([unit[j] for j in indices if j != i], axis=0))
         for i in indices
@@ -232,7 +362,7 @@ def summarise_directly(
         others = [unit[j] for j in indices if j != i and segment[j] == segment[i]]
         if others:
             to_rest_within.append(cosine(unit[i], np.sum(others, axis=0)))
-    return tuple(
+    means = tuple(
         mean_or_nan(values)
         for values in (
             adjacent,
@@ -243,6 +373,7 @@ def summarise_directly(
             to_rest_within,
         )
     )
+    return (*means, spread)
 
 
 @pytest.mark.parametrize("seed", range(10))
@@ -264,6 +395,7 @@ def test_summary_matches_a_direct_implementation(seed: int) -> None:
         result.reference_coherence,
         result.local_coherence_within_segments,
         result.global_coherence_within_segments,
+        result.local_coherence_shuffled_sd,
     )
     expected = summarise_directly(vectors, boundaries, reference)
     assert computed == pytest.approx(expected, abs=1e-12, nan_ok=True)
@@ -276,6 +408,13 @@ def test_summary_matches_a_direct_implementation(seed: int) -> None:
 def test_reference_coherence_by_hand() -> None:
     result = coherence([EAST, NORTH, NORTH_EAST], reference=EAST, boundaries=())
     assert result.reference_coherence == pytest.approx((1.0 + 0.0 + math.sqrt(0.5)) / 3)
+
+
+def test_reference_coherence_is_defined_for_a_single_unit() -> None:
+    result = coherence([EAST], reference=NORTH_EAST)
+    assert result.reference_coherence == pytest.approx(math.sqrt(0.5))
+    assert math.isnan(result.local_coherence)
+    assert math.isnan(result.global_coherence)
 
 
 def test_reference_coherence_is_nan_without_a_reference() -> None:
@@ -476,41 +615,253 @@ def test_input_is_not_modified(units: Array) -> None:
 @pytest.mark.parametrize("block_size", [1, 2, 3, 5, 7])
 def test_block_similarities_match_the_definition(block_size: int) -> None:
     unit = normalise(rng(6).standard_normal((20, 7)))
-    fast = _block_similarities(_area_table(unit @ unit.T), block_size)
-    slow = []
+    of_sums, between_units = _block_similarities(_area_table(unit @ unit.T), block_size)
+    slow_sums, slow_units = [], []
     for gap in range(block_size, 20 - block_size + 1):
-        before = unit[gap - block_size : gap].sum(axis=0)
-        after = unit[gap : gap + block_size].sum(axis=0)
-        slow.append(before @ after / (np.linalg.norm(before) * np.linalg.norm(after)))
-    assert fast == pytest.approx(slow, abs=1e-10)
-    assert fast.size == 20 - 2 * block_size + 1
+        before, after = unit[gap - block_size : gap], unit[gap : gap + block_size]
+        slow_sums.append(cosine(before.sum(axis=0), after.sum(axis=0)))
+        slow_units.append(
+            np.mean([first @ second for first in before for second in after])
+        )
+    assert of_sums == pytest.approx(slow_sums, abs=1e-10)
+    assert between_units == pytest.approx(slow_units, abs=1e-10)
+    assert of_sums.size == between_units.size == 20 - 2 * block_size + 1
 
 
 def test_block_similarities_need_a_block_on_each_side() -> None:
     unit = normalise(rng(7).standard_normal((5, 3)))
     table = _area_table(unit @ unit.T)
-    assert _block_similarities(table, 3).size == 0
-    assert _block_similarities(table, 2).size == 2
+    assert [values.size for values in _block_similarities(table, 3)] == [0, 0]
+    assert [values.size for values in _block_similarities(table, 2)] == [2, 2]
+
+
+def test_blocks_that_mix_two_contents_alike_point_the_same_way() -> None:
+    # East and north, then north and east: the two blocks have the same sum,
+    # and half of the pairs made of a unit of each are at right angles.
+    mixed = np.array([EAST, NORTH, NORTH, EAST])
+    of_sums, between_units = _block_similarities(_area_table(mixed @ mixed.T), 2)
+    assert of_sums == pytest.approx([1.0])
+    assert between_units == pytest.approx([0.5])
+    # Four units on one content are alike on both counts.
+    same = np.array([EAST] * 4)
+    of_sums, between_units = _block_similarities(_area_table(same @ same.T), 2)
+    assert of_sums == pytest.approx([1.0])
+    assert between_units == pytest.approx([1.0])
+
+
+INF = math.inf
 
 
 @pytest.mark.parametrize(
-    ("scores", "depth", "position"),
+    ("scores", "left", "right"),
     [
-        ([5.0, 1.0, 4.0], 3.0, 1),  # the lower side rises by 3
-        ([4.0, 1.0, 5.0], 3.0, 1),
-        ([3.0, 1.0, 2.0, 0.0, 5.0], 3.0, 3),  # to the highest point of each side
-        ([5.0, 2.0, 3.0, 2.5, 6.0], 3.0, 1),  # a small bump does not stop the rise
-        ([1.0, 2.0, 3.0], 0.0, 0),  # lowest point at the start: no valley
-        ([3.0, 2.0, 1.0], 0.0, 2),  # lowest point at the end: no valley
-        ([2.0, 2.0, 2.0], 0.0, 0),  # flat
-        ([4.0, 1.0, 1.0, 4.0], 3.0, 1),  # of two equal lowest points, the first
-        ([7.0], 0.0, 0),
+        ([5.0, 1.0, 4.0], [-INF, 4.0, 1.0], [-1.0, 3.0, -INF]),
+        # Each rise goes to the highest point of its side, not to the nearest.
+        (
+            [3.0, 1.0, 2.0, 0.0, 5.0],
+            [-INF, 2.0, 1.0, 3.0, -2.0],
+            [2.0, 4.0, 3.0, 5.0, -INF],
+        ),
+        ([1.0, 2.0, 3.0], [-INF, -1.0, -1.0], [2.0, 1.0, -INF]),  # no valley
+        ([2.0, 2.0, 2.0], [-INF, 0.0, 0.0], [0.0, 0.0, -INF]),  # flat
+        ([7.0], [-INF], [-INF]),
+        ([], [], []),
     ],
 )
-def test_valley(scores: list[float], depth: float, position: int) -> None:
-    found_depth, found_position = _valley(np.array(scores))
-    assert found_depth == pytest.approx(depth)
-    assert found_position == position
+def test_rises(scores: list[float], left: list[float], right: list[float]) -> None:
+    found_left, found_right = _rises(np.array(scores))
+    assert found_left.tolist() == left
+    assert found_right.tolist() == right
+
+
+def test_size_pairs() -> None:
+    def pairs(sizes: list[int]) -> list[tuple[int, int]]:
+        on_the_left, on_the_right = _size_pairs(sizes)
+        return [
+            (sizes[i], sizes[j]) for i, j in zip(on_the_left, on_the_right, strict=True)
+        ]
+
+    assert pairs([3]) == [(3, 3)]
+    assert pairs([3, 4]) == [(3, 3), (3, 4), (4, 3), (4, 4)]
+    # Neither size is more than twice the other.
+    assert pairs([3, 6, 7]) == [(3, 3), (3, 6), (6, 3), (6, 6), (6, 7), (7, 6), (7, 7)]
+    for n in (8, 24, 40, 100, 400):
+        found = pairs(_block_sizes(n, 3))
+        assert len(found) == len(set(found))
+        assert all((right, left) in found for left, right in found)
+        assert all(left <= 2 * right and right <= 2 * left for left, right in found)
+
+
+def test_the_best_block_sizes_of_the_two_sides_are_within_a_factor_of_two() -> None:
+    # With a units of one topic before a boundary and b units of another
+    # after it, the blocks compared on the left of the boundary each lie
+    # within one topic up to a size of min(a / 2, b), and those compared on
+    # its right up to min(b / 2, a). This is why pairs of sizes in which one
+    # is more than twice the other are not examined.
+    for before in range(1, 200):
+        for after in range(1, 200):
+            left = min(Fraction(before, 2), Fraction(after))
+            right = min(Fraction(after, 2), Fraction(before))
+            assert left <= 2 * right
+            assert right <= 2 * left
+
+
+def valleys_by_pair(
+    unit: Array, sizes: list[int]
+) -> dict[tuple[int, int], tuple[float, ...]]:
+    """Depth on each of the two similarities, and position, by pair of sizes."""
+    on_the_left, on_the_right = _size_pairs(sizes)
+    depths, positions = _valley_depths(
+        _area_table(unit @ unit.T), sizes, on_the_left, on_the_right
+    )
+    return {
+        (sizes[i], sizes[j]): (
+            float(depths[0, pair]),
+            float(depths[1, pair]),
+            int(positions[pair]),
+        )
+        for pair, (i, j) in enumerate(zip(on_the_left, on_the_right, strict=True))
+    }
+
+
+def test_valley_depths_by_hand() -> None:
+    # Twelve units in two dimensions: six along one axis, then six along the
+    # other. With blocks of three both similarities are 1 at gaps 3 and 9,
+    # where the two blocks lie on the same axis, and fall to 0 at gap 6.
+    unit = np.array([EAST] * 6 + [NORTH] * 6)
+    assert valleys_by_pair(unit, [3])[3, 3] == pytest.approx((1.0, 1.0, 6))
+    # Blocks of two and of three, in the four combinations: the valley is at
+    # the same place and has the same depth whichever sizes measure its sides.
+    found = valleys_by_pair(unit, [2, 3])
+    assert len(found) == 4
+    for pair in found.values():
+        assert pair == pytest.approx((1.0, 1.0, 6))
+
+
+def test_a_valley_needs_two_sides() -> None:
+    # Three units on one axis and nine on the other. With blocks of three the
+    # similarities are lowest at the first gap of the curves, which has
+    # nothing on its left: a rise on one side only is not a valley.
+    unit = np.array([EAST] * 3 + [NORTH] * 9)
+    assert valleys_by_pair(unit, [3])[3, 3] == (0.0, 0.0, 3)
+
+
+def test_the_candidate_is_where_the_curves_are_lowest_together() -> None:
+    # Eleven units in two dimensions, given by their angles. Unit 4 stands
+    # apart from its neighbours, and the direction turns for good, by one
+    # radian, before unit 7.
+    angles = np.array([0.0, 0.0, 0.0, 0.0, 1.2, 0.3, 0.3, 1.3, 1.3, 1.3, 1.3])
+    unit = np.column_stack([np.cos(angles), np.sin(angles)])
+    found = valleys_by_pair(unit, [1, 2])
+    # Between single units the two similarities are the same thing. They are
+    # lowest before unit 4, at cos 1.2.
+    apart = math.cos(1.2)
+    assert found[1, 1] == pytest.approx((1.0 - apart, 1.0 - apart, 4))
+    # With blocks of two, the block after gap 4 holds unit 4 and the next
+    # unit. Its sum points halfway between them, at 0.75 radian from the
+    # block before, and its two units are at 1.2 and 0.3 radian from the
+    # units before. Both similarities are lower at gap 7, at cos 1.
+    turn = math.cos(1.0)
+    of_sums = math.cos(0.75)
+    between_units = (math.cos(1.2) + math.cos(0.3)) / 2
+    assert of_sums + between_units > 2 * turn
+    assert found[2, 2] == pytest.approx((1.0 - turn, 1.0 - turn, 7))
+    # For the two mixed pairs the four curves are lowest together at gap 4.
+    # One side rises from the similarities of single units, the other from
+    # those of blocks of two, and the smaller rise is the depth.
+    assert 2 * apart + of_sums + between_units < 4 * turn
+    for pair in ((1, 2), (2, 1)):
+        assert found[pair] == pytest.approx((1.0 - of_sums, 1.0 - between_units, 4))
+
+
+def test_the_two_sides_of_a_valley_can_use_different_block_sizes() -> None:
+    # Six units on one axis and eighteen on the other. On the left of the
+    # boundary there is room for a rise with blocks of three only; on the
+    # right, blocks of six give a rise as well.
+    found = valleys_by_pair(np.array([EAST] * 6 + [NORTH] * 18), [3, 6])
+    assert found[3, 3] == pytest.approx((1.0, 1.0, 6))
+    assert found[3, 6] == pytest.approx((1.0, 1.0, 6))
+    # With blocks of six on the left, the first gap of the curves is the
+    # boundary itself, which then has nothing on its left.
+    assert found[6, 6][:2] == (0.0, 0.0)
+    assert found[6, 3][:2] == (0.0, 0.0)
+
+
+def reaching_the_ordered_text(first: int, second: int, block_size: int) -> Fraction:
+    """Share of the arrangements of two groups that reach the ordered one.
+
+    The units of a group are identical, so that an arrangement is a choice
+    of places for the first group. Returns the proportion of arrangements
+    whose statistic is at least that of the arrangement in which the first
+    group comes first: the p-value that the test would give to that text if
+    it examined every reordering.
+    """
+    n = first + second
+    sizes = _block_sizes(n, block_size)
+    on_the_left, on_the_right = _size_pairs(sizes)
+    mirror = np.lexsort((on_the_left, on_the_right))
+    arrangements = list(itertools.combinations(range(n), first))
+    depths = np.empty((2, on_the_left.size, len(arrangements)))
+    for index, places in enumerate(arrangements):
+        unit = np.array([EAST if place in places else NORTH for place in range(n)])
+        depths[:, :, index], _ = _valley_depths(
+            _area_table(unit @ unit.T), sizes, on_the_left, on_the_right
+        )
+    scored = _scores(depths, mirror, 1e-12 * n)
+    assert scored is not None
+    scores, _, margin = scored
+    strongest = scores.max(axis=0)
+    # The first arrangement has the first group in the first places.
+    reaching = int((strongest >= strongest[0] - margin).sum())
+    return Fraction(reaching, len(arrangements))
+
+
+def test_only_the_ordered_text_and_its_mirror_image_have_the_deepest_valley() -> None:
+    # Two groups of identical units, each long enough for two blocks. Among
+    # all the ways of arranging the units, the two that keep the groups
+    # apart have the largest statistic, and no other reaches it.
+    assert reaching_the_ordered_text(6, 6, 3) == Fraction(2, 924)
+    assert reaching_the_ordered_text(8, 8, 3) == Fraction(2, 12870)
+    assert reaching_the_ordered_text(4, 4, 2) == Fraction(2, 70)
+
+
+def test_each_similarity_alone_is_matched_by_other_arrangements() -> None:
+    # Six units and six units, all those of a group identical, with blocks
+    # of three. In the ordered text both similarities go from 1 to 0 and
+    # back to 1: a depth of 1, the largest possible.
+    places = list(itertools.combinations(range(12), 6))
+    on_the_left, on_the_right = _size_pairs([3])
+    depths = np.empty((2, len(places)))
+    for index, chosen in enumerate(places):
+        unit = np.array([EAST if place in chosen else NORTH for place in range(12)])
+        found, _ = _valley_depths(
+            _area_table(unit @ unit.T), [3], on_the_left, on_the_right
+        )
+        depths[:, index] = found[:, 0]
+    assert depths[:, 0] == pytest.approx([1.0, 1.0])
+    as_deep = depths >= 1.0 - 1e-9
+    # The cosine between the sums of two blocks is 1 whenever they hold the
+    # two groups in the same proportions, and 58 of the 924 arrangements
+    # have a valley as deep as the ordered text by this similarity alone.
+    assert int(as_deep[0].sum()) == 58
+    # By the mean similarity between units, only the ordered text and its
+    # mirror image do.
+    assert int(as_deep[1].sum()) == 2
+    assert int(as_deep.all(axis=0).sum()) == 2
+
+
+def test_a_group_shorter_than_two_blocks_can_be_out_of_reach() -> None:
+    # Four units and four units with blocks of three: the blocks on either
+    # side of the boundary cannot both lie within a group, and 4 of the 70
+    # arrangements reach the statistic of the ordered one. Its p-value
+    # cannot go below 4/70, which is above 0.05, however distinct the groups.
+    assert reaching_the_ordered_text(4, 4, 3) == Fraction(4, 70)
+    assert reaching_the_ordered_text(4, 8, 3) > Fraction(1, 20)
+    # Three units and three units with blocks of two: 4 of 20.
+    assert reaching_the_ordered_text(3, 3, 2) == Fraction(4, 20)
+    # Five and five with blocks of three: the two arrangements that keep the
+    # groups apart are alone again.
+    assert reaching_the_ordered_text(5, 5, 3) == Fraction(2, 252)
 
 
 def test_block_sizes() -> None:
@@ -519,13 +870,21 @@ def test_block_sizes() -> None:
     assert _block_sizes(24, 3) == [3, 4, 5, 6]
     assert _block_sizes(24, 2) == [2, 3, 4, 5, 6]
     assert _block_sizes(6, 1) == [1]
+    # No block is larger than four times the smallest, however long the text.
+    assert _block_sizes(100, 3) == list(range(3, 13))
+    assert _block_sizes(10_000, 3) == list(range(3, 13))
     # Steps of one, then of a tenth of the current size.
-    assert _block_sizes(100, 3) == [*range(3, 21), 22, 24]
+    assert _block_sizes(400, 12) == [
+        *range(12, 21),
+        *(22, 24, 26, 28),
+        *(30, 33, 36, 39),
+        *(42, 46),
+    ]
     for n in (8, 30, 77, 400):
         sizes = _block_sizes(n, 3)
         assert sizes == sorted(set(sizes))
         assert all(n - 2 * size + 1 >= 3 for size in sizes)
-        assert sizes[-1] <= max(3, n // 4)
+        assert sizes[-1] <= max(3, min(n // 4, 12))
 
 
 # The test for boundaries on simulated sequences
@@ -547,6 +906,26 @@ def test_two_topics_give_one_boundary_between_them() -> None:
     assert result.segments == ((0, 12), (12, 24))
     assert result.tested
     assert result.n_units == 24
+
+
+def test_a_boundary_near_the_start_or_the_end_is_found() -> None:
+    def unequal(seed: int, lengths: tuple[int, int]) -> Array:
+        state = rng(seed)
+        first, second = directions(2, 48, state)
+        return np.vstack(
+            [
+                topic(first, lengths[0], 1.0, state),
+                topic(second, lengths[1], 1.0, state),
+            ]
+        )
+
+    for lengths in ((6, 18), (18, 6)):
+        found = 0
+        for seed in range(30):
+            result = segment_topics(unequal(200 + seed, lengths), n_permutations=99)
+            if len(result.boundaries) == 1:
+                found += abs(result.boundaries[0] - lengths[0]) <= 1
+        assert found >= 24, lengths
 
 
 def test_three_topics_give_two_boundaries() -> None:
@@ -596,6 +975,27 @@ def test_gradual_drift_is_rarely_split() -> None:
     assert min(float(blocks[i] @ blocks[i + 1]) for i in range(3)) > 0.8
     # But there is no point at which it changes abruptly.
     assert count_reported(drifting) <= 9
+
+
+def test_a_slow_transition_between_two_topics_is_rarely_split() -> None:
+    def slow_transition(state: np.random.RandomState) -> Array:
+        # Twenty-four units on one topic, forty-eight during which the
+        # subject moves by equal steps to another, twenty-four on the other.
+        first, second = directions(2, 48, state)
+        steps = (np.arange(48) + 0.5) / 48
+        weights = np.concatenate([np.zeros(24), steps, np.ones(24)])[:, np.newaxis]
+        centres = normalise((1 - weights) * first + weights * second)
+        scatter = state.standard_normal((96, 48)) / math.sqrt(48)
+        return normalise(centres + 1.0 * scatter)
+
+    # The transition lasts four times as long as the largest block compared.
+    assert _block_sizes(96, DEFAULT_BLOCK_SIZE)[-1] == 12
+    reported = 0
+    for seed in range(30):
+        sequence = slow_transition(rng(2000 + seed))
+        if segment_topics(sequence, n_permutations=99, seed=seed).boundaries:
+            reported += 1
+    assert reported <= 4
 
 
 def test_one_unrelated_unit_is_rarely_a_boundary() -> None:
@@ -748,13 +1148,13 @@ def test_permutations_are_the_same_everywhere() -> None:
     # The reorderings come from the raw stream of the PCG64 bit generator.
     # These two values pin that stream: if they change, results obtained
     # with a given seed are no longer reproducible.
-    sequence = two_topics(11, n_each=6, noise=1.8)
+    sequence = two_topics(14, n_each=6, noise=1.8)
     assert segment_topics(
         sequence, alpha=0.9, seed=0, n_permutations=FAST
-    ).p_values == (0.03,)
+    ).p_values == (0.105,)
     assert segment_topics(
         sequence, alpha=0.9, seed=1, n_permutations=FAST
-    ).p_values == (0.04,)
+    ).p_values == (0.16,)
 
 
 def test_false_positive_rate_under_exchangeability() -> None:
@@ -763,7 +1163,7 @@ def test_false_positive_rate_under_exchangeability() -> None:
     # about 10 of them at most. If the rate were exactly 5%, more than 21
     # would occur with probability 0.0005. This check can only reveal a
     # gross excess; the simulation reported in docs/validation.md rests on
-    # 70,000 sequences.
+    # 80,000 sequences.
     state = rng(9)
     reported = 0
     for seed in range(200):
@@ -785,23 +1185,63 @@ def test_power_for_two_clearly_distinct_topics() -> None:
 # Agreement of the whole procedure with a direct implementation
 
 
-def block_curve(unit: Array, size: int) -> list[float]:
-    """Cosine between the sums of the ``size`` units before and after each gap."""
-    curve = []
+def block_curves(unit: Array, size: int) -> tuple[list[float], list[float]]:
+    """The two block similarities at each gap, computed from the vectors.
+
+    The cosine between the sums of the ``size`` units before and after the
+    gap, and the mean similarity between a unit before and a unit after.
+    """
+    of_sums, between_units = [], []
     for gap in range(size, len(unit) - size + 1):
-        before = unit[gap - size : gap].sum(axis=0)
-        after = unit[gap : gap + size].sum(axis=0)
-        cosine = before @ after / (np.linalg.norm(before) * np.linalg.norm(after))
-        curve.append(float(cosine))
-    return curve
+        before, after = unit[gap - size : gap], unit[gap : gap + size]
+        of_sums.append(cosine(before.sum(axis=0), after.sum(axis=0)))
+        pairs = [float(first @ second) for first in before for second in after]
+        between_units.append(sum(pairs) / len(pairs))
+    return of_sums, between_units
 
 
-def deepest_valley(curve: list[float]) -> tuple[float, int]:
-    """Depth and position of the lowest point; no depth at either end."""
-    lowest = curve.index(min(curve))
-    if lowest in (0, len(curve) - 1):
-        return 0.0, lowest
-    return min(max(curve[:lowest]), max(curve[lowest + 1 :])) - curve[lowest], lowest
+def candidate_valleys(
+    unit: Array, sizes: list[int], pairs: list[tuple[int, int]]
+) -> list[tuple[float, float, int]]:
+    """Depths and position of the candidate boundary for each pair of block sizes.
+
+    The candidate is the gap where the sum of the two similarities at the
+    two sizes is smallest. On each similarity, the rise on its left is the
+    highest value at an earlier gap minus the value at the candidate, for
+    blocks of the first size; the rise on its right is the same with later
+    gaps and the second size. The depth is the smaller of the two, and zero
+    if one is missing or negative.
+    """
+    n = len(unit)
+    curves: dict[int, list[dict[int, float]]] = {}
+    for size in sizes:
+        gaps = range(size, n - size + 1)
+        curves[size] = [
+            dict(zip(gaps, values, strict=True)) for values in block_curves(unit, size)
+        ]
+    found = []
+    for before, after in pairs:
+        shared = [gap for gap in curves[before][0] if gap in curves[after][0]]
+        together = [
+            (curves[before][0][gap] + curves[before][1][gap])
+            + (curves[after][0][gap] + curves[after][1][gap])
+            for gap in shared
+        ]
+        candidate = shared[together.index(min(together))]
+        depths = []
+        for measure in (0, 1):
+            on_the_left, on_the_right = curves[before][measure], curves[after][measure]
+            earlier = [value for gap, value in on_the_left.items() if gap < candidate]
+            later = [value for gap, value in on_the_right.items() if gap > candidate]
+            depth = 0.0
+            if earlier and later:
+                depth = min(
+                    max(earlier) - on_the_left[candidate],
+                    max(later) - on_the_right[candidate],
+                )
+            depths.append(max(depth, 0.0))
+        found.append((depths[0], depths[1], candidate))
+    return found
 
 
 def segment_directly(
@@ -822,35 +1262,58 @@ def segment_directly(
         n = len(part)
         sizes = []
         size = block_size
-        while size <= max(block_size, n // 4) and n - 2 * size + 1 >= 3:
+        largest = max(block_size, min(n // 4, 4 * block_size))
+        while size <= largest and n - 2 * size + 1 >= 3:
             sizes.append(size)
             size += max(1, size // 10)
         if not sizes or level < Fraction(1, 1 + n_permutations):
             continue
+        pairs = [
+            (before, after)
+            for before in sizes
+            for after in sizes
+            if before <= 2 * after and after <= 2 * before
+        ]
         orders = [np.arange(n)]
         for _ in range(n_permutations):
             orders.append(np.argsort(generator.random_raw(n), kind="stable"))
+        valleys = [candidate_valleys(part[order], sizes, pairs) for order in orders]
+        # One row for each similarity, one column for each pair of sizes, one
+        # layer for each arrangement.
         depths = np.array(
             [
-                [deepest_valley(block_curve(part[order], size))[0] for order in orders]
-                for size in sizes
+                [
+                    [valley[row][measure] for valley in valleys]
+                    for row in range(len(pairs))
+                ]
+                for measure in (0, 1)
             ]
         )
         # Depths closer than this are equal to within rounding error.
         rounding = 1e-12 * n
-        spread = depths.std(axis=1)
-        keep = spread > rounding
-        if not keep.any():
+        # A pair of sizes and its mirror image share one mean and one
+        # standard deviation. Depths that do not vary count for zero.
+        standard = np.zeros(depths.shape)
+        spreads = []
+        for measure in (0, 1):
+            for row, (before, after) in enumerate(pairs):
+                mirror = pairs.index((after, before))
+                both = np.concatenate([depths[measure, row], depths[measure, mirror]])
+                if both.std() > rounding:
+                    spreads.append(float(both.std()))
+                    centred = depths[measure, row] - both.mean()
+                    standard[measure, row] = centred / both.std()
+        keep = [row for row in range(len(pairs)) if standard[:, row].any()]
+        if not spreads:
             continue
-        centred = depths[keep] - depths[keep].mean(axis=1, keepdims=True)
-        standard = centred / spread[keep, np.newaxis]
-        statistic = standard.max(axis=0)
-        ties = rounding / spread[keep].min()
+        scores = standard.sum(axis=0)[keep]
+        statistic = scores.max(axis=0)
+        ties = 2 * rounding / min(spreads)
         reached = int((statistic[1:] >= statistic[0] - ties).sum())
         if Fraction(1 + reached, 1 + n_permutations) > level:
             continue
-        best = int(np.array(sizes)[keep][int(np.argmax(standard[:, 0]))])
-        middle = start + best + deepest_valley(block_curve(part, best))[1]
+        best = keep[int(np.argmax(scores[:, 0]))]
+        middle = start + valleys[0][best][2]
         found[middle] = (1 + reached) / (1 + n_permutations)
         pending.append((start, middle, level * Fraction(middle - start, n)))
         pending.append((middle, stop, level * Fraction(stop - middle, n)))

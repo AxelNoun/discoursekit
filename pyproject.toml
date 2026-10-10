@@ -56,12 +56,12 @@ dev = [
 packages = ["src/discoursekit"]
 
 [tool.pytest.ini_options]
-# The examples in the docstrings and in the README are run as tests, so that
-# the documentation cannot drift away from the code. The importlib mode lets
-# the modules under src/ be collected whether the package is installed in
-# editable mode or not.
-testpaths = ["tests", "src", "README.md"]
-addopts = "-ra --strict-markers --strict-config --import-mode=importlib --doctest-modules --doctest-glob=README.md -m 'not network'"
+# The examples in the docstrings, in the README and in the documentation are
+# run as tests, so that the documentation cannot drift away from the code.
+# The importlib mode lets the modules under src/ be collected whether the
+# package is installed in editable mode or not.
+testpaths = ["tests", "src", "README.md", "docs/short-texts.md"]
+addopts = "-ra --strict-markers --strict-config --import-mode=importlib --doctest-modules --doctest-glob=README.md --doctest-glob=short-texts.md -m 'not network'"
 markers = [
     "network: needs network access to download a published model (not run by default)",
 ]

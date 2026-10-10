@@ -26,9 +26,9 @@ ruff format --check .
 mypy
 ```
 
-`pytest` also runs the examples of the docstrings and of the README. Three
-tests download a published model and are not run by default; run them with
-`pytest -m network tests/test_embedding.py`.
+`pytest` also runs the examples of the docstrings, of the README and of
+`docs/short-texts.md`. Three tests download a published model and are not
+run by default; run them with `pytest -m network tests/test_embedding.py`.
 
 ## Adding or changing a measure
 
@@ -50,9 +50,12 @@ A change that alters the value returned by a measure for the same input is a
 breaking change and is flagged as such in the changelog.
 
 A change to the test for topic boundaries is followed by a new run of
-`studies/boundary_test_simulation.py`. Its output replaces
-`studies/results/boundary_test_simulation.md`, and the tables of
-[docs/validation.md](docs/validation.md) are updated from it.
+`studies/boundary_test_simulation.py` and of
+`studies/block_similarity_comparison.py`. Their outputs replace the files of
+`studies/results/`, and the tables of
+[docs/validation.md](docs/validation.md) are copied from them: a test fails
+when the page and the stored outputs differ. The text that comments on the
+tables is revised by hand.
 
 ## Updating the Unicode data
 

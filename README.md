@@ -99,7 +99,7 @@ by a permutation test, which can also be called on its own:
 >>> found.boundaries
 (8,)
 >>> found.p_values
-(0.018,)
+(0.001,)
 
 ```
 
@@ -126,6 +126,7 @@ The result contains the following fields.
 |---|---|
 | `local_coherence` | Mean cosine similarity between consecutive units |
 | `local_coherence_shuffled` | Value expected for the same units in random order |
+| `local_coherence_shuffled_sd` | Standard deviation of local coherence over all orders of the same units |
 | `global_coherence` | Mean similarity between each unit and the centroid of the others |
 | `reference_coherence` | Mean similarity between each unit and a reference vector, if one is given |
 | `local_coherence_within_segments`, `global_coherence_within_segments` | Local and global coherence computed inside the segments delimited by the topic boundaries |
@@ -138,6 +139,7 @@ The result contains the following fields.
 |---|---|
 | [docs/metrics.md](docs/metrics.md) | Registry of measures: definition, sources, hypotheses, known confounds and what to report, for each quantity |
 | [docs/validation.md](docs/validation.md) | What has been checked, how, with what result, and what has not been checked |
+| [docs/short-texts.md](docs/short-texts.md) | What each measure needs and what can be expected of it when a text has few units |
 | [docs/background.md](docs/background.md) | Related work and position of the library |
 | [docs/scope-and-ethics.md](docs/scope-and-ethics.md) | Intended use and limits |
 

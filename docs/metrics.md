@@ -28,6 +28,9 @@ Contents:
 8. [Planned measures](#8-planned-measures)
 9. [References](#9-references)
 
+What the measures need and how precise they are when a text has few units
+is the subject of [short-texts.md](short-texts.md).
+
 ---
 
 ## 1. Tokens
@@ -171,7 +174,8 @@ texts excluded for being shorter than the window; library version.
 ## 3. Local coherence
 
 Field `local_coherence` of the result of `coherence`, with its reference
-level `local_coherence_shuffled`; function `adjacent_similarities`. Module
+level `local_coherence_shuffled` and the spread of that level,
+`local_coherence_shuffled_sd`; function `adjacent_similarities`. Module
 `discoursekit.semantic`.
 
 ### Definition
@@ -189,6 +193,16 @@ The reference level is the value that local coherence takes on average when
 the same units are placed in random order. It equals the mean cosine
 similarity over all pairs of distinct units and is computed in closed form.
 
+The spread of the reference level is the standard deviation of local
+coherence over all orders of the same units, also in closed form. Write
+*d*(*i*, *j*) for the similarity between units *i* and *j* minus the mean
+similarity over all pairs, *Q* for the sum of the squares of *d* over
+ordered pairs of distinct units, and *R* for the sum, over units, of the
+squared sum of *d* between a unit and all the others. Over the orders of *n*
+units, the sum of the *n* - 1 similarities between consecutive units has
+variance *Q* / *n* - 2 *R* / (*n* (*n* - 1)), and the standard deviation of
+local coherence is the square root of this variance divided by *n* - 1.
+
 ### Why a reference level
 
 The cosine similarity between two unrelated units is not zero in general,
@@ -197,6 +211,13 @@ spaces are not isotropic (Ethayarajh, 2019, for contextual word
 representations). A local coherence of 0.4 is therefore uninterpretable in
 isolation. The difference between local coherence and its reference level
 isolates what is due to the order of the units.
+
+That difference is not zero for units in random order: it varies from one
+order to another, and the more so the fewer the units. The spread states
+by how much. The difference divided by the spread has mean zero and standard
+deviation one over the orders of the units, whatever their number. Its
+distribution over orders is not normal in general, and with few units it
+takes few distinct values.
 
 ### Measurement hypotheses
 
@@ -207,6 +228,10 @@ of six units.
 **H-COH-2.** Local coherence is unchanged when the text is read backwards,
 when the vectors are rescaled, and when the embedding space is rotated.
 Tested on random vectors.
+
+**H-COH-6.** The standard deviation of local coherence over all orderings of
+a set of units equals the spread of the reference level. Tested by
+enumeration of all orderings of two to seven units.
 
 ### Motivating hypothesis
 
@@ -234,16 +259,19 @@ Bedi et al., 2015). This library makes no claim about that proposal.
 * **Language.** Parola et al. (2023) examined how far automated measures of
   coherence generalise across languages. Do not compare values across
   languages.
-* **Number of units.** With few units the mean rests on few pairs. Summaries
-  based on extreme values, such as the minimum used by Bedi et al. (2015),
-  depend on the number of units.
+* **Number of units.** With few units the mean rests on few pairs, and
+  local coherence departs from its reference level by chance; the spread of
+  the reference level gives the size of such departures. Summaries based on
+  extreme values, such as the minimum used by Bedi et al. (2015), depend on
+  the number of units.
 * **Speaker background.** See section 2.
 
 ### What to report
 
 Embedding model and revision; definition of the unit; number of units and
 their mean length in tokens; number of truncated units; local coherence
-together with its reference level; library version.
+together with its reference level and the spread of that level; library
+version.
 
 ---
 
@@ -275,6 +303,12 @@ their number, whereas the same quantity computed with a centroid that
 includes the unit is close to the inverse square root of the number of
 units. Tested with five random directions in 2,000 dimensions.
 
+**H-COH-7.** For related units, global coherence increases with their
+number. When every pair of units has the same similarity *r*, it equals
+√(*n* - 1) *r* / √(1 + (*n* - 2) *r*) for *n* units, which goes from *r*
+for two units towards √*r*. Tested on vectors built to have the same
+similarity between all pairs.
+
 ### Motivating hypothesis
 
 A speaker who stays on topic produces units that resemble the rest of what
@@ -291,8 +325,16 @@ Those of local coherence, and in addition:
   being less coherent in the ordinary sense. See sections 6 and 7.
 * **Progression.** A narrative whose content moves on steadily has lower
   global coherence than a description of a single scene.
-* **The centroid is estimated from the text itself.** In a short text it is
-  a noisy estimate of the topic. See section 5 for an external reference.
+* **Number of units.** The centroid is estimated from the text itself, and
+  from fewer units in a shorter text. Global coherence therefore increases
+  with the number of units for texts of the same kind (H-COH-7): in the
+  simulated texts of [short-texts.md](short-texts.md) it goes from 0.62
+  with four units to 0.70 with 32. Do not compare texts of different
+  lengths on this quantity without taking the number of units into
+  account. The mean similarity over all pairs of units, returned as
+  `local_coherence_shuffled`, does not depend on the number of units in
+  this way, and section 5 describes a reference that does not come from
+  the text.
 
 ### What to report
 
@@ -356,16 +398,52 @@ procedure defines them, for example where a new question was asked. This is
 the preferred option whenever it is available. Otherwise they are estimated
 as follows.
 
-*Statistic.* For a block size *k* and each position with *k* units on both
-sides, the cosine similarity between the sum of the *k* units before and the
-sum of the *k* units after is computed. This is the block comparison of
-TextTiling (Hearst, 1997), applied to embeddings. The lowest point of the
-resulting curve is the candidate boundary. Its depth is the smaller of the
-two rises from that point to the highest point of the curve on its left and
-on its right. Depths are computed for block sizes from `block_size` up to a
-quarter of the number of units, in steps of one tenth of the current size
-(at least one), and standardised at each block size. The largest
-standardised depth is the test statistic.
+*Block similarities.* For a block size *s* and each gap between two units
+that has *s* units on both sides, two similarities are computed between the
+*s* units before the gap and the *s* units after it.
+
+* The cosine similarity between the sum of the units before and the sum of
+  the units after. This is the block comparison of TextTiling (Hearst,
+  1997), applied to embeddings. It compares the directions of the two
+  blocks.
+* The mean cosine similarity between a unit before the gap and a unit after
+  it: local coherence across the gap, at the scale of the block. It is low
+  when the two blocks differ, and also when the units of a block differ
+  among themselves.
+
+A change of topic lowers both at the gap where it occurs and leaves them
+high on either side, which gives each curve of similarities a valley with
+two sides.
+
+*Depth.* The two sides of a valley are measured with block sizes that may
+differ. For a pair of sizes, one for each side, the candidate boundary is
+the gap at which the similarities are lowest together: the gap that
+minimises the sum of the two similarities at the two sizes, among the gaps
+that the curves of both sizes cover. On each similarity, the rise on the
+left of the candidate is the highest value found at an earlier gap minus the
+value at the candidate, both computed with blocks of the first size. The
+rise on its right is defined in the same way with later gaps and the second
+size. The depth of the candidate is the smaller of its two rises, and zero
+when one of them is missing or negative: a valley has two sides.
+
+The two sides have their own block sizes because they do not have the same
+room. With *a* units of one topic before a boundary and *b* units of another
+after it, the rise on the left is complete, in the sense that the blocks it
+compares each lie within one topic, for blocks of at most min(*a*/2, *b*)
+units, and the rise on the right for blocks of at most min(*b*/2, *a*)
+units. Neither of these two numbers is more than twice the other, whatever
+*a* and *b*. Pairs of sizes in which one is more than twice the other are
+therefore not examined.
+
+*Statistic.* Block sizes go from `block_size` to four times `block_size`,
+without exceeding a quarter of the number of units, in steps of one tenth of
+the current size (at least one). For a pair of sizes, the depths on each
+similarity are standardised with their mean and standard deviation over the
+observed order and the reorderings described below, and the two standardised
+depths are added. A pair and its mirror image, which exchanges left and
+right, have the same distribution over reorderings and share one mean and
+one standard deviation. The largest sum is the test statistic, and the
+candidate of the pair that reaches it is the candidate boundary of the text.
 
 *Test.* The statistic is recomputed on random reorderings of the units. The
 p-value is (1 + *b*) / (1 + *B*), where *b* is the number of reorderings,
@@ -387,27 +465,64 @@ Levels and p-values are compared in exact arithmetic. A part whose level is
 below the smallest p-value that the reorderings can give, 1 / (1 + *B*), is
 not examined.
 
+### Why two similarities
+
+Each similarity, used alone, has a defect that the other does not have.
+
+Two blocks that hold two topics in the same proportions have the same
+direction, and the cosine between their sums is 1, as it is for two blocks
+on one topic. Random reorderings of a text that has two topics therefore
+contain valleys as deep as a real boundary. With six units on one topic
+followed by six on another, the units of a topic being identical, 58 of the
+924 arrangements of the units have a valley as deep as that of the ordered
+text by this similarity; its p-value could not go below 58/924, which is
+above 0.05. By the mean similarity between units, only the ordered text and
+its mirror image have it, and the same holds for the sum of the two
+standardised depths.
+
+The mean similarity between units falls wherever content varies, whether it
+changes at one point or slides over many units, and a valley measured on it
+alone is reported more often in texts whose content drifts.
+[validation.md](validation.md) compares the three choices on simulated
+sequences.
+
 ### Relation to TextTiling
 
-The depth used here differs from the depth score of Hearst (1997) in two
-ways. It takes the smaller of the two rises instead of their sum, and it
-measures each rise to the highest point on that side instead of the nearest
-peak. A rise on one side only is thus not counted as a valley, and the
-smoothing step of TextTiling is not needed. TextTiling places boundaries
-where the depth score exceeds a cutoff equal to the mean of the depth scores
-of the text minus a fraction of their standard deviation. Some position
-exceeds such a cutoff in any text whose depth scores are not all equal,
-whether or not the topic changes. The permutation test replaces the cutoff
-so that a text without a change of topic can be recognised as such.
+TextTiling gives every gap a depth score, the sum of the rises from the gap
+to the nearest peak on each side (Hearst, 1997, section 5.3). The depth used
+here differs in four ways. It is computed at the lowest point only; it
+takes the smaller of the two rises instead of their sum; it measures each
+rise to the highest point on that side instead of the nearest peak; and it
+lets the two rises be measured with blocks of different sizes. A rise on one
+side only is thus not counted as a valley, and the smoothing step of
+TextTiling is not needed.
+
+TextTiling compares blocks of a single size, meant to approximate the
+average length of a paragraph (Hearst, 1997, section 5.2.1). Here a range of
+sizes is examined, and the range is set by `block_size`, not by the length
+of the text, so that the same question is asked of a short text and of a
+long one.
+
+TextTiling places boundaries where the depth score exceeds a cutoff equal to
+the mean of the depth scores of the text minus a fraction of their standard
+deviation. Some position exceeds such a cutoff in any text whose depth
+scores are not all equal, whether or not the topic changes. The permutation
+test replaces the cutoff so that a text without a change of topic can be
+recognised as such.
 
 ### What the definition includes and excludes
 
 * A boundary is a valley with two sides: two blocks that differ from each
   other more than the blocks on either side of them do.
-* A gradual drift of content has no valley and gives no boundary.
+* A steady drift of content has no valley and gives no boundary.
+* Abruptness is relative to the blocks. A transition between two topics
+  that is completed within about the largest block gives a valley as a
+  change at one point does; a transition four times as long does not.
 * Low similarity scattered through a text is also what random reorderings
   produce, and gives no boundary.
-* A single unit unrelated to its neighbours does not separate two blocks.
+* One or two units unrelated to their neighbours are not a topic. They
+  lower the similarity of the blocks that contain them, however, and can
+  give a valley.
 
 This definition is a choice. It treats a change of topic as an ordered
 structure and does not use the cues by which a listener recognises that a
@@ -422,11 +537,25 @@ benchmark in the roadmap.
 `alpha`. This follows from the construction of the test; checked by
 simulation.
 
-**H-SEG-2.** A gradual drift is not reported. Checked by simulation.
+**H-SEG-2.** A steady drift of content gives no boundary: it is reported at
+a rate close to the level of the test or below it, whether it runs through
+the whole text or begins after a stable passage. Checked by simulation.
 
-**H-SEG-3.** A change of topic between two sufficiently long segments is
-reported at the right place. Checked by simulation, which also shows where
-the test lacks power.
+**H-SEG-3.** An abrupt change of topic between two segments of at least
+twice `block_size` units is reported at the right place, wherever it lies in
+the text. Checked by simulation, which also shows where the test lacks
+power.
+
+**H-SEG-5.** A transition between two topics is reported when it is no
+longer than the largest block, and is not when it is four times as long.
+Checked by simulation.
+
+**H-SEG-6.** When a text consists of two groups of identical units, each
+long enough for two blocks, no arrangement of its units has a larger
+statistic than the one that keeps the groups apart, and only its mirror
+image has one as large. Checked by enumeration of every arrangement, for
+groups of four units with blocks of two and for groups of six and of eight
+units with blocks of three.
 
 The simulations use synthetic vectors, not text.
 [validation.md](validation.md) gives the results, including the cases in
@@ -435,16 +564,28 @@ which the test performs poorly.
 ### Known limits
 
 * **Short texts.** A text needs at least 2 × `block_size` + 2 units to be
-  tested. The field `tested` says whether it was.
-* **Short segments and edges.** A boundary is never placed within
-  `block_size` units of either end of the part under test. A segment shorter
-  than about twice the block size is rarely delimited, and a boundary close
-  to the beginning or the end of a text is often missed, because the valley
-  lacks a side.
+  tested. The field `tested` says whether it was. A text that can be tested
+  is not thereby long enough for a boundary to be found: see
+  [short-texts.md](short-texts.md).
+* **Segments shorter than two blocks.** A boundary is never placed within
+  `block_size` units of either end of the part under test, and a segment of
+  fewer than twice `block_size` units has no room for the two blocks that
+  make one side of a valley. Such a segment is rarely delimited: in the
+  simulation, a passage of four units between two longer ones is delimited
+  on both sides in at most 19% of cases with blocks of three units. A
+  smaller `block_size` finds shorter segments.
 * **Weakly distinct topics.** Power falls when the units of a topic are
-  only weakly similar to one another or the topics are close.
-* **Isolated unrelated unit.** In a short text, an unrelated unit placed in
-  the middle is reported as a boundary more often than the nominal level.
+  only weakly similar to one another or the topics are close. Since the
+  blocks are bounded, it does not go on rising with the length of the
+  segments. A larger `block_size` gives larger blocks.
+* **Transitions.** The test does not tell a transition shorter than its
+  largest block from a change at one point, and it reports part of the
+  transitions that are twice as long.
+* **Unrelated units.** In the simulation, an unrelated unit in the middle
+  of a text of 24 units is reported as a boundary in 13% to 16% of cases,
+  which is more than the nominal level, and two adjacent unrelated units in
+  41% to 57%. The test does not tell a digression of two units from the
+  beginning of a new topic.
 * **Further boundaries.** The guarantee of H-SEG-1 concerns a text without
   any boundary. In a text that has boundaries, each further test can add a
   false one.

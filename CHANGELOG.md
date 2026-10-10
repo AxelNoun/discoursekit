@@ -17,13 +17,15 @@ value returned by a measure for the same input is a breaking change.
   McFall, 2010).
 - `coherence`, `adjacent_similarities`: local, global and reference
   coherence computed from embeddings, with the level of local coherence
-  expected under random order.
+  expected under random order and its standard deviation over orders.
 - `segment_topics`: permutation test for topic boundaries, and coherence
   within the resulting segments.
 - `SentenceTransformerEmbedder`: optional adapter for the
   `sentence-transformers` library, with a warning for truncated units.
 - Registry of measures (`docs/metrics.md`), validation status
-  (`docs/validation.md`), background (`docs/background.md`) and scope
-  statement (`docs/scope-and-ethics.md`).
-- Simulation study of the test for topic boundaries
-  (`studies/boundary_test_simulation.py`).
+  (`docs/validation.md`), guidance on short texts (`docs/short-texts.md`),
+  background (`docs/background.md`) and scope statement
+  (`docs/scope-and-ethics.md`).
+- Simulation studies of the test for topic boundaries
+  (`studies/boundary_test_simulation.py`,
+  `studies/block_similarity_comparison.py`).
