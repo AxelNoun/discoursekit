@@ -234,9 +234,12 @@ All these figures concern sequences in which the units of a topic are drawn
 independently of one another. In speech, consecutive units are usually more
 alike than distant ones, and the test then also reports boundaries where the
 topic does not change: in simulated sequences of 24 units on one topic, in
-10% to 14% of cases ([metrics.md](metrics.md), section 6). For short
-samples, as for long ones, the positions of the changes are best supplied,
-and an estimated boundary should be reported as an estimate.
+10% to 14% of cases, and in real texts of 12 sentences on one subject, news
+dispatches and film reviews embedded as averaged word vectors, in 7% to 12%
+([validation.md](validation.md), section 4). In those real texts, two texts
+of 6 sentences each, joined, were separated at the join in at most 35% of
+cases. For short samples, as for long ones, the positions of the changes are
+best supplied, and an estimated boundary should be reported as an estimate.
 
 ## 5. References
 

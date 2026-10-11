@@ -102,5 +102,5 @@ files = ["src", "tests", "tools", "studies"]
 
 [[tool.mypy.overrides]]
 # Optional dependencies, imported lazily; they may not be installed.
-module = ["sentence_transformers.*", "torch.*", "transformers.*"]
+module = ["sentence_transformers.*", "torch.*", "transformers.*", "nltk.*", "spacy.*"]
 ignore_missing_imports = true

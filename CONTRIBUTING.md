@@ -58,6 +58,9 @@ when a table of that part of the page is not, row for row, one of the stored
 tables. The text that comments on the tables is revised by hand.
 `studies/repeated_unit_embeddings.py` concerns the embedding adapter and
 needs the optional dependency; its output is stored in the same folder.
+`studies/real_text_boundaries.py` needs the optional dependency and NLTK,
+and downloads public corpora and a model on its first run; its output is
+stored there too, with the name of the embedding when it is not the default.
 
 ## Updating the Unicode data
 

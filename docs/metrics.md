@@ -596,7 +596,19 @@ way, a boundary was reported in 10% to 48% of cases, against a nominal 5%
 ([validation.md](validation.md), section 4). How often this happens with
 embeddings of real speech is not known; it depends on how much more alike
 consecutive units are than distant ones, and on the geometry of the
-embedding.
+embedding. The same excess is found in real texts that keep to one subject:
+with sentences embedded as averaged word vectors, a boundary is reported in
+7% to 15% of news dispatches and film reviews of 12 to 24 sentences, and in
+29% of reviews of 48 sentences, against 2% to 6.5% when the sentences of the
+same texts are in random order.
+
+The standard remedy for dependent data is to reorder runs of consecutive
+units rather than single units (Kirch, 2007), for instance by circular block
+permutation (Chen, 2019). The level then holds approximately, for long
+sequences. In the simulations and the real texts of this library, runs of 3
+units bring the excess close to the nominal level in texts of 12 to 24
+units, but not in texts of 48, and detection falls sharply in short texts.
+The library does not offer this option at present.
 
 A reported boundary thus shows that the order of the units departs from
 random order at that place, in the way a change of topic would make it
@@ -809,6 +821,10 @@ Bestgen, Y. (2025). Estimating lexical diversity using the moving average
 type-token ratio (MATTR): Pros and cons. *Research Methods in Applied
 Linguistics*, 4(1), 100168. https://doi.org/10.1016/j.rmal.2024.100168
 
+Chen, H. (2019). *Change-point detection for multivariate and
+non-Euclidean data with local dependency* (arXiv:1903.01598). arXiv.
+https://arxiv.org/abs/1903.01598
+
 Covington, M. A., & McFall, J. D. (2010). Cutting the Gordian knot: The
 moving-average type-token ratio (MATTR). *Journal of Quantitative
 Linguistics*, 17(2), 94-100. https://doi.org/10.1080/09296171003643098
@@ -842,6 +858,10 @@ Iter, D., Yoon, J. H., & Jurafsky, D. (2018). Automatic detection of
 incoherent speech for diagnosing schizophrenia. In *Proceedings of the Fifth
 Workshop on Computational Linguistics and Clinical Psychology: From Keyboard
 to Clinic* (pp. 136-146). https://aclanthology.org/W18-0615/
+
+Kirch, C. (2007). Block permutation principles for the change analysis of
+dependent data. *Journal of Statistical Planning and Inference*, 137(7),
+2453-2474. https://doi.org/10.1016/j.jspi.2006.09.026
 
 Matteson, D. S., & James, N. A. (2014). A nonparametric approach for
 multiple change point analysis of multivariate data. *Journal of the

@@ -654,6 +654,16 @@ def _scores(
     return standard[:, kept].sum(axis=0), kept, weights, margin
 
 
+def _reordering(bit_generator: np.random.PCG64, n: int) -> NDArray[np.intp]:
+    """Draw a random order of ``n`` units, every order being equally likely.
+
+    The raw output of the bit generator is stable across NumPy versions, so
+    that a seed gives the same permutations everywhere. The studies replace
+    this function to compare other schemes of reordering.
+    """
+    return np.argsort(bit_generator.random_raw(n), kind="stable")
+
+
 def _test_segment(
     gram: Vectors,
     block_size: int,
@@ -686,9 +696,7 @@ def _test_segment(
         if arrangement == 0:
             table = _area_table(counts)
         else:
-            # The raw output of the bit generator is stable across NumPy
-            # versions, so a seed gives the same permutations everywhere.
-            order = np.argsort(bit_generator.random_raw(n), kind="stable")
+            order = _reordering(bit_generator, n)
             table = _area_table(counts[np.ix_(order, order)])
         depths = _valley_depths(table, unit, sizes, on_the_left, on_the_right)
         deepest[:, :, arrangement] = depths.max(axis=2)
