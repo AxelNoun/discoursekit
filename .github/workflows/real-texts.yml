@@ -1,0 +1,52 @@
+name: real texts
+
+# Runs studies/real_text_boundaries.py on demand and keeps its output as an
+# artifact of the run. The corpora and the model are downloaded by the
+# script; nothing of the texts is stored.
+
+on:
+  workflow_dispatch:
+    inputs:
+      texts:
+        description: "Largest number of texts at each length"
+        default: "400"
+        required: true
+      model:
+        description: "sentence-transformers model"
+        default: "sentence-transformers/all-MiniLM-L6-v2"
+        required: true
+      revision:
+        description: "Revision of the model (empty for the current one)"
+        default: "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+        required: false
+
+jobs:
+  study:
+    name: Boundaries in real texts
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install PyTorch without GPU libraries
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install
+        run: python -m pip install -e ".[embeddings]" nltk
+      - name: Run the study
+        run: >
+          python studies/real_text_boundaries.py
+          --texts "${{ inputs.texts }}"
+          --model "${{ inputs.model }}"
+          --revision "${{ inputs.revision }}"
+          --raw real_text_boundaries_raw.jsonl
+      - name: Show the report
+        run: cat studies/results/real_text_boundaries.md
+      - uses: actions/upload-artifact@v7
+        with:
+          name: real-text-boundaries
+          path: |
+            studies/results/real_text_boundaries.md
+            real_text_boundaries_raw.jsonl
+          if-no-files-found: error

@@ -61,6 +61,8 @@ needs the optional dependency; its output is stored in the same folder.
 `studies/real_text_boundaries.py` needs the optional dependency and NLTK,
 and downloads public corpora and a model on its first run; its output is
 stored there too, with the name of the embedding when it is not the default.
+The workflow `real texts` runs it on GitHub on demand and keeps its output
+as an artifact of the run.
 
 ## Updating the Unicode data
 
