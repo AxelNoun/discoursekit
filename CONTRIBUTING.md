@@ -62,7 +62,9 @@ needs the optional dependency; its output is stored in the same folder.
 and downloads public corpora and a model on its first run; its output is
 stored there too, with the name of the embedding when it is not the default.
 The workflow `real texts` runs it on GitHub on demand and keeps its output
-as an artifact of the run.
+as an artifact of the run; when the workflow is given the name of a branch,
+it also commits the output there, which is of use where the artifacts cannot
+be downloaded. Such a branch is deleted once its files have been fetched.
 
 ## Updating the Unicode data
 

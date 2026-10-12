@@ -2,7 +2,10 @@ name: real texts
 
 # Runs studies/real_text_boundaries.py on demand and keeps its output as an
 # artifact of the run. The corpora and the model are downloaded by the
-# script; nothing of the texts is stored.
+# script; nothing of the texts is stored. When a branch is named, the output
+# is also committed to that branch, for places from which the artifacts of
+# GitHub cannot be downloaded; the branch is meant to be deleted once its
+# files have been fetched.
 
 on:
   workflow_dispatch:
@@ -19,12 +22,18 @@ on:
         description: "Revision of the model (empty for the current one)"
         default: "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
         required: false
+      branch:
+        description: "Branch to commit the output to (empty for none)"
+        default: ""
+        required: false
 
 jobs:
   study:
     name: Boundaries in real texts
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -35,11 +44,15 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[embeddings]" nltk
       - name: Run the study
+        env:
+          TEXTS: ${{ inputs.texts }}
+          MODEL: ${{ inputs.model }}
+          REVISION: ${{ inputs.revision }}
         run: >
           python studies/real_text_boundaries.py
-          --texts "${{ inputs.texts }}"
-          --model "${{ inputs.model }}"
-          --revision "${{ inputs.revision }}"
+          --texts "$TEXTS"
+          --model "$MODEL"
+          --revision "$REVISION"
           --raw real_text_boundaries_raw.jsonl
       - name: Show the report
         run: cat studies/results/real_text_boundaries.md
@@ -50,3 +63,15 @@ jobs:
             studies/results/real_text_boundaries.md
             real_text_boundaries_raw.jsonl
           if-no-files-found: error
+      - name: Commit the output to a branch
+        if: inputs.branch != ''
+        env:
+          BRANCH: ${{ inputs.branch }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add studies/results/real_text_boundaries.md real_text_boundaries_raw.jsonl
+          git commit -m "Output of run $RUN_ID"
+          git push origin "$BRANCH"
