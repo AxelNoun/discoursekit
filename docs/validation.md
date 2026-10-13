@@ -629,38 +629,55 @@ somewhat.
 to one subject: dispatches of the Reuters-21578 collection assigned to a
 single category (ApteMod version, distributed with NLTK), without their
 headline, and the film reviews of the polarity dataset of [Pang and Lee
-(2004)](https://doi.org/10.3115/1218955.1218990). Each text is cut to its first 12, 24 or 48 sentences of at least
-five words, and is also tested with its sentences in random order. The
-circular block permutation of [Chen
+(2004)](https://doi.org/10.3115/1218955.1218990). Each text is cut to its
+first 12, 24 or 48 sentences of at least five words, and is also tested with
+its sentences in random order. The circular block permutation of [Chen
 (2019)](https://arxiv.org/abs/1903.01598), which keeps runs of 2 or 3
 consecutive sentences together, is compared with the reordering of the
 library. Joined texts, the first half of one text followed by the first half
-of another, measure detection. The output obtained with averaged word
-vectors (spaCy `en_core_web_md`) is in
+of another, measure detection. The sentences are embedded with
+`all-MiniLM-L6-v2` at a fixed revision; the output is in
+[`studies/results/real_text_boundaries.md`](../studies/results/real_text_boundaries.md).
+A second run, with averaged word vectors (spaCy `en_core_web_md`), is in
 [`studies/results/real_text_boundaries_word_vectors.md`](../studies/results/real_text_boundaries_word_vectors.md).
-Percentages rest on 57 to 400 texts.
+Percentages rest on 62 to 400 texts.
 
+* **Similarity.** The mean cosine between consecutive sentences is 0.29 to
+  0.39, and between sentences further apart 0.20 to 0.33. The texts have
+  the structure that the simulation with related consecutive units
+  imitates.
 * **False boundaries.** A boundary is reported in 12% of the dispatches and
-  7% of the reviews of 12 sentences, in 15% and 12% of those of 24
-  sentences, and in 29% of the reviews of 48 sentences. With the sentences
-  of the same texts in random order, the rate is 2% to 6.5%. The excess
-  comes from the order of the sentences, as in the simulation with related
-  consecutive units, and is of the same size.
+  of the reviews of 12 sentences, in 20% of the dispatches and 31% of the
+  reviews of 24 sentences, and in 53% of the reviews of 48 sentences. With
+  the sentences of the same texts in random order, the rate is 2.6% to
+  6.2%. The excess comes from the order of the sentences, grows with the
+  length of the text, and is larger than in the simulation. Within a group
+  it is larger in the half of the texts whose consecutive sentences are most
+  alike relative to distant ones: 38% against 24.5% for the reviews of 24
+  sentences, 67% against 39% for those of 48.
 * **Circular block permutation.** With runs of 3 sentences, the rate falls
-  to 4% to 7% at 12 and 24 sentences, and to 13% at 48.
+  to 5% to 6% at 12 sentences, 10% to 14% at 24 and 25% at 48.
 * **Detection.** Two dispatches of different categories, joined, are
-  separated at the join in 29% to 35% of cases by the test of the library,
-  and two reviews of different films in 8% to 12%, which is of the order of
-  the rate of false boundaries in single reviews, and below it at 24 and 48
-  sentences. With runs of 3 sentences these rates fall to 10% to 21% and 5%
-  to 7%.
+  separated at the join and nowhere else in 66% to 78% of cases by the test
+  of the library, and two reviews of different films in 28.5% to 44%. At
+  48 sentences a boundary is reported at the join in 93.5% of the joined
+  dispatches and 50% of the joined reviews, but it is the only one in 69%
+  and 30%. With runs of 3 sentences, detection at 12 sentences falls to 19%
+  and 10.5%; at 48 sentences it equals or exceeds that of the test of the
+  library.
+* **Word vectors.** With averaged word vectors, consecutive sentences are
+  barely more alike than distant ones (mean cosine 0.63 to 0.74 against
+  0.60 to 0.72), fewer false boundaries are reported, 7% to 15% at 12 and
+  24 sentences and 29% at 48, and far fewer joins are found, 29% to 35% for
+  dispatches and 8.5% to 12% for reviews. The representation that finds the
+  joins also sees more of the structure of a text on one subject.
 * **Reading.** A dispatch is taken to keep to one story and a review to one
   film; this is not checked sentence by sentence, and some of the boundaries
-  counted as false may be changes of sub-topic. That is the difficulty
-  itself: in these texts the test does not separate a change of subject from
-  the internal structure of a text. Averaged word vectors are a weak
-  representation of sentences. The same study with a sentence-embedding
-  model, `all-MiniLM-L6-v2`, the default of the script, remains to be run.
+  counted as false may be changes of sub-topic: a review moves from the plot
+  to the verdict. That is the difficulty itself: in these texts the test
+  does not separate a change of subject from the internal structure of a
+  text. The rates are those of two corpora of written English with one
+  model; those of transcribed speech remain to be measured.
 
 ### Checks in the test suite
 

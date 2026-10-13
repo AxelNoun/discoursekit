@@ -41,4 +41,6 @@ value returned by a measure for the same input is a breaking change.
   (`studies/repeated_unit_embeddings.py`).
 - A study of the test for topic boundaries on real texts that keep to one
   subject, Reuters-21578 dispatches and film reviews, with the circular block
-  permutation of Chen as a comparison (`studies/real_text_boundaries.py`).
+  permutation of Chen as a comparison (`studies/real_text_boundaries.py`),
+  run with a sentence-embedding model and with averaged word vectors; a
+  workflow runs it on GitHub on demand.

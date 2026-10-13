@@ -36,6 +36,16 @@ Percentage of texts in which a boundary is reported, with each scheme of reorder
 | Reviews | 24 | 12.2% (9 to 16) | 7.9% (6 to 11) | 6.6% (5 to 10) | 5.1% (3 to 8) |
 | Reviews | 48 | 28.7% (23 to 35) | 19.4% (15 to 25) | 13.4% (10 to 19) | 5.1% (3 to 9) |
 
+The difference between the two mean similarities of a text, consecutive sentences less sentences further apart, varies from text to text. Percentage of texts in which a boundary is reported (One by one) in the half of the texts whose difference is smaller, and in the other half:
+
+| Corpus | Sentences | Smaller difference | Larger difference |
+|---|---:|---:|---:|
+| Reuters | 12 | 6.5% (4 to 11) | 17.0% (12 to 23) |
+| Reuters | 24 | 8.8% (4 to 18) | 21.7% (14 to 33) |
+| Reviews | 12 | 4.0% (2 to 8) | 10.6% (7 to 16) |
+| Reviews | 24 | 8.7% (5 to 13) | 15.8% (11 to 22) |
+| Reviews | 48 | 19.4% (13 to 28) | 38.0% (29 to 47) |
+
 ## Two texts joined
 
 The first half of a text followed by the first half of another: two dispatches of different categories, or reviews of two films. Percentage of joined texts in which one boundary is reported, within one sentence of the join:
@@ -48,6 +58,17 @@ The first half of a text followed by the first half of another: two dispatches o
 | Reviews | 12 | 199 | 10.1% (7 to 15) | 7.0% (4 to 11) | 5.0% (3 to 9) |
 | Reviews | 24 | 199 | 8.5% (5 to 13) | 4.0% (2 to 8) | 5.0% (3 to 9) |
 | Reviews | 48 | 190 | 12.1% (8 to 18) | 7.9% (5 to 13) | 7.4% (4 to 12) |
+
+Percentage of joined texts in which a boundary is reported within one sentence of the join, whatever else is reported:
+
+| Corpus | Sentences | One by one | Circular blocks of 2 | Circular blocks of 3 |
+|---|---:|---:|---:|---:|
+| Reuters | 12 | 34.8% (28 to 42) | 22.7% (17 to 29) | 9.9% (6 to 15) |
+| Reuters | 24 | 32.4% (26 to 40) | 21.2% (16 to 28) | 11.8% (8 to 17) |
+| Reuters | 48 | 37.1% (26 to 50) | 25.8% (17 to 38) | 21.0% (13 to 33) |
+| Reviews | 12 | 10.1% (7 to 15) | 7.0% (4 to 11) | 5.0% (3 to 9) |
+| Reviews | 24 | 9.5% (6 to 14) | 5.0% (3 to 9) | 5.5% (3 to 10) |
+| Reviews | 48 | 14.2% (10 to 20) | 9.5% (6 to 14) | 9.5% (6 to 14) |
 
 Percentage of joined texts in which at least one boundary is reported:
 

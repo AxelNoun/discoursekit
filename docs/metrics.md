@@ -597,18 +597,19 @@ way, a boundary was reported in 10% to 48% of cases, against a nominal 5%
 embeddings of real speech is not known; it depends on how much more alike
 consecutive units are than distant ones, and on the geometry of the
 embedding. The same excess is found in real texts that keep to one subject:
-with sentences embedded as averaged word vectors, a boundary is reported in
-7% to 15% of news dispatches and film reviews of 12 to 24 sentences, and in
-29% of reviews of 48 sentences, against 2% to 6.5% when the sentences of the
-same texts are in random order.
+with sentences embedded by `all-MiniLM-L6-v2`, a boundary is reported in
+12% of news dispatches and film reviews of 12 sentences, in 20% to 31% of
+those of 24 sentences and in 53% of reviews of 48 sentences, against 2.6% to
+6.2% when the sentences of the same texts are in random order.
 
 The standard remedy for dependent data is to reorder runs of consecutive
 units rather than single units (Kirch, 2007), for instance by circular block
 permutation (Chen, 2019). The level then holds approximately, for long
-sequences. In the simulations and the real texts of this library, runs of 3
-units bring the excess close to the nominal level in texts of 12 to 24
-units, but not in texts of 48, and detection falls sharply in short texts.
-The library does not offer this option at present.
+sequences. In the real texts of this library, runs of 3 units bring the
+rate close to the nominal level in texts of 12 sentences (5% to 6%), less so
+in texts of 24 (10% to 14%) and not in texts of 48 (25%), and detection
+falls sharply in short texts. The library does not offer this option at
+present.
 
 A reported boundary thus shows that the order of the units departs from
 random order at that place, in the way a change of topic would make it
