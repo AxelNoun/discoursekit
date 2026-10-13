@@ -4,8 +4,8 @@ name: real texts
 # artifact of the run. The corpora and the model are downloaded by the
 # script; nothing of the texts is stored. When a branch is named, the output
 # is also committed to that branch, for places from which the artifacts of
-# GitHub cannot be downloaded; the branch is meant to be deleted once its
-# files have been fetched.
+# GitHub cannot be downloaded. The branch holds the output of the latest run
+# only and is meant to be deleted once its files have been fetched.
 
 on:
   workflow_dispatch:
@@ -74,4 +74,4 @@ jobs:
           git checkout -b "$BRANCH"
           git add studies/results/real_text_boundaries.md real_text_boundaries_raw.jsonl
           git commit -m "Output of run $RUN_ID"
-          git push origin "$BRANCH"
+          git push --force origin "$BRANCH"
