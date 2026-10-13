@@ -247,10 +247,16 @@ class Group:
     """Texts of one corpus at one length, in one condition."""
 
     texts: int = 0
+    # Counts of texts, by scheme of reordering: with any boundary, with the
+    # planted boundary alone, and with the planted boundary among others.
     reported: dict[str, int] = field(default_factory=dict)
     correct: dict[str, int] = field(default_factory=dict)
+    at_join: dict[str, int] = field(default_factory=dict)
+    # Per text: the two mean similarities, and whether the reordering of the
+    # library reported a boundary.
     near: list[float] = field(default_factory=list)
     far: list[float] = field(default_factory=list)
+    found: list[bool] = field(default_factory=list)
 
 
 def similarities(unit: Array) -> tuple[float, float]:
@@ -315,6 +321,9 @@ def study(
                             abs(a - b) <= 1 for a, b in zip(found, truth, strict=True)
                         )
                         group.correct[label] = group.correct.get(label, 0) + right
+                        near_truth = any(abs(a - b) <= 1 for a in found for b in truth)
+                        group.at_join[label] = group.at_join.get(label, 0) + near_truth
+                    group.found.append(bool(found_by[next(iter(REORDERINGS))]))
                     records.append(
                         {
                             "corpus": corpus,
@@ -423,6 +432,26 @@ def report(groups: dict[tuple[str, int, str], Group], embedding: str) -> list[st
         lines.append(f"| {corpus} | {length} | " + " | ".join(cells) + " |")
     lines += [
         "",
+        "The difference between the two mean similarities of a text, "
+        "consecutive sentences less sentences further apart, varies from text "
+        f"to text. Percentage of texts in which a boundary is reported ({labels[0]}) "
+        "in the half of the texts whose difference is smaller, and in the other "
+        "half:",
+        "",
+        "| Corpus | Sentences | Smaller difference | Larger difference |",
+        "|---|---:|---:|---:|",
+    ]
+    for corpus, length, group in rows(groups, "Ordered"):
+        difference = np.subtract(group.near, group.far)
+        order = np.argsort(difference, kind="stable")
+        found = np.asarray(group.found)[order]
+        half = len(found) // 2
+        lines.append(
+            f"| {corpus} | {length} | {percent(int(found[:half].sum()), half)} "
+            f"| {percent(int(found[half:].sum()), len(found) - half)} |"
+        )
+    lines += [
+        "",
         "## Two texts joined",
         "",
         "The first half of a text followed by the first half of another: two "
@@ -439,6 +468,17 @@ def report(groups: dict[tuple[str, int, str], Group], embedding: str) -> list[st
         lines.append(
             f"| {corpus} | {length} | {group.texts} | " + " | ".join(cells) + " |"
         )
+    lines += [
+        "",
+        "Percentage of joined texts in which a boundary is reported within one "
+        "sentence of the join, whatever else is reported:",
+        "",
+        f"| Corpus | Sentences | {heads} |",
+        "|---|---:|" + "---:|" * len(labels),
+    ]
+    for corpus, length, group in planted:
+        cells = [percent(group.at_join[label], group.texts) for label in labels]
+        lines.append(f"| {corpus} | {length} | " + " | ".join(cells) + " |")
     lines += [
         "",
         "Percentage of joined texts in which at least one boundary is reported:",
